@@ -1,0 +1,18 @@
+[package]
+name = "mls-py-interop"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Cross-implementation interop tests: mls_py (mls-rs) <-> OpenMLS"
+
+[dependencies]
+
+[dev-dependencies]
+mls-facade = { path = "../crates/mls-facade" }
+openmls = "=0.9.1"
+openmls_rust_crypto = "=0.6.0"
+openmls_basic_credential = "=0.6.0"
+openmls_traits = "=0.6.0"
+
+[workspace]
+members = ["."]
