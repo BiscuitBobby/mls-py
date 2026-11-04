@@ -1,0 +1,47 @@
+[package]
+name = "mls-py-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+mls-facade = { path = "../crates/mls-facade" }
+mls-rs = { git = "https://github.com/awslabs/mls-rs", rev = "6c819eface1e8b00a3241412d1b7e21c162df515" }
+
+[[bin]]
+name = "parse_message"
+path = "fuzz_targets/parse_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "process"
+path = "fuzz_targets/process.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "join"
+path = "fuzz_targets/join.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "key_package"
+path = "fuzz_targets/key_package.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
