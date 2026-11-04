@@ -1,4 +1,4 @@
-# mls_py design record
+# mls-py design record
 
 This file records the decisions the binding makes and the *observed* upstream
 behaviour those decisions rest on. Every observation is pinned by a test in

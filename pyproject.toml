@@ -3,7 +3,7 @@ requires = ["maturin>=1.9,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "mls_py"
+name = "mls-py"
 version = "0.1.0"
 description = "Minimal Python binding for mls-rs, an implementation of Messaging Layer Security (RFC 9420)"
 readme = "README.md"

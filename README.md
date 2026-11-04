@@ -1,6 +1,6 @@
-# mls_py
+# mls-py
 
-`mls_py` is a minimal Python binding for the [mls-rs](https://github.com/awslabs/mls-rs)
+`mls-py` (imported as `mls_py`) is a minimal Python binding for the [mls-rs](https://github.com/awslabs/mls-rs)
 implementation of Messaging Layer Security (MLS, [RFC 9420](https://www.rfc-editor.org/rfc/rfc9420)):
 a synchronous, byte-oriented API for creating groups, managing membership,
 processing messages and exporting group secrets. It prioritizes a small API
@@ -12,7 +12,7 @@ The Python API is small; the security model is not trimmed to match. Read the
 ## Install
 
 ```sh
-pip install mls_py
+pip install mls-py
 ```
 
 CI builds abi3 wheels (CPython 3.9+) for Linux x86_64/aarch64 (manylinux_2_28, glibc
@@ -144,7 +144,7 @@ calls on one group are serialized internally. Groups outlive their `Client`.
 
 ## Security
 
-- `mls_py` **uses mls-rs; it does not implement MLS**. Crypto is AWS-LC
+- `mls-py` **uses mls-rs; it does not implement MLS**. Crypto is AWS-LC
   (`mls-rs-crypto-awslc`, non-FIPS build). Cipher suites: 1
   (X25519/AES-128-GCM/Ed25519) and 2 (P-256/AES-128-GCM/P-256).
 - **No independent third-party audit** of mls-rs or of this binding is

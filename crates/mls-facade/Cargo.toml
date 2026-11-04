@@ -1,6 +1,6 @@
 [package]
 name = "mls-facade"
-description = "Pure-Rust facade over mls-rs used by the mls_py Python binding"
+description = "Pure-Rust facade over mls-rs used by the mls-py Python binding"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -1,6 +1,6 @@
 [package]
 name = "mls-py"
-description = "PyO3 layer of the mls_py Python binding for mls-rs"
+description = "PyO3 layer of the mls-py Python binding for mls-rs"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
