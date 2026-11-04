@@ -60,7 +60,7 @@ test_wheels() {
       -v "$ROOT/tests":/tests:ro -v "$OUT/$arch":/wheels:ro \
       "python:$py-slim" sh -euc "
         python -m venv /venv
-        /venv/bin/pip install -q --disable-pip-version-check --no-index --find-links /wheels mls_py
+        /venv/bin/pip install -q --disable-pip-version-check --no-index --find-links /wheels mls-py
         /venv/bin/pip install -q --disable-pip-version-check 'pytest>=8' 'hypothesis>=6'
         cd /tmp && cp -r /tests t && cd t
         /venv/bin/python -c 'import mls_py, sys; print(sys.version.split()[0], mls_py.__version__, mls_py.SUPPORTED_CIPHER_SUITES)'

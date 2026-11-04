@@ -121,7 +121,7 @@ jobs:
           if [ -d /tmp/venv ]; then VENV=/tmp/venv; else VENV=venv; fi
           if [ -x "$VENV/Scripts/python.exe" ]; then PY="$VENV/Scripts/python.exe"; else PY="$VENV/bin/python"; fi
           "$PY" -m pip install --upgrade pip
-          "$PY" -m pip install --no-index --find-links dist mls_py
+          "$PY" -m pip install --no-index --find-links dist mls-py
           "$PY" -m pip install "pytest>=8" "hypothesis>=6"
           cd tests && "$PY" -m pytest -q -p no:cacheprovider --rootdir=. .
 
