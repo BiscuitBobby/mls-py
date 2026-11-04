@@ -90,7 +90,9 @@ sdist_test() {
       . \$HOME/.cargo/env
       python -m venv /venv
       /venv/bin/pip install -q --disable-pip-version-check /sdist/*.tar.gz 'pytest>=8' 'hypothesis>=6'
-      cp -r /tests /tmp/t && cd /tmp/t && /venv/bin/python -m pytest -q -p no:cacheprovider ." 2>&1 | tail -3
+      cp -r /tests /tmp/t && cd /tmp/t && /venv/bin/python -m pytest -q -p no:cacheprovider ." \
+    > "$OUT/sdist-test.log" 2>&1 || { tail -40 "$OUT/sdist-test.log"; return 1; }
+  tail -3 "$OUT/sdist-test.log"
 }
 
 case "${1:-}" in
