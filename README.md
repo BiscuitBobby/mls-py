@@ -205,6 +205,12 @@ key, and never log it.
 **Threads.** Methods release the interpreter for the whole MLS operation;
 calls on one group are serialized internally. Groups outlive their `Client`.
 
+**asyncio.** The API is synchronous. Because every call releases the
+interpreter, `await asyncio.to_thread(group.process, message)` keeps the event
+loop responsive. Calls on one group are serialized, but tasks don't run them
+in a guaranteed order, so drive each group from one task (or await its calls
+in sequence) when order matters, as it does for commits.
+
 ## Security
 
 - `mls_py` **uses mls-rs; it does not implement MLS**. Crypto is AWS-LC
