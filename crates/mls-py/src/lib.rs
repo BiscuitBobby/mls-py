@@ -186,6 +186,13 @@ impl Group {
             .map_err(|e| to_py_err(py, e))
     }
 
+    /// True between `leave()` and the next commit in this group.
+    #[getter]
+    fn leave_pending(&self, py: Python<'_>) -> PyResult<bool> {
+        py.detach(|| self.inner.leave_pending())
+            .map_err(|e| to_py_err(py, e))
+    }
+
     /// `[(leaf_index, identity), ...]` for current members.
     #[getter]
     fn members<'py>(&self, py: Python<'py>) -> PyResult<Vec<(u32, Bound<'py, PyBytes>)>> {
@@ -219,6 +226,14 @@ impl Group {
             .detach(|| self.inner.remove(idx))
             .map_err(|e| to_py_err(py, e))?;
         Ok(bytes(py, c))
+    }
+
+    /// Proposal asking another member to remove us; send it to the group.
+    fn leave<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        let p = py
+            .detach(|| self.inner.leave())
+            .map_err(|e| to_py_err(py, e))?;
+        Ok(bytes(py, p))
     }
 
     /// Commit refreshing our own leaf key and including received proposals.

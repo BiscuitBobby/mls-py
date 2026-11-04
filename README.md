@@ -56,11 +56,13 @@ client.load_group(group_id: bytes) -> Group
 group.add(key_package) -> (commit, welcome)  # pending
 group.remove(leaf_index) -> commit           # pending
 group.commit() -> commit                     # pending; self-update + received proposals
+group.leave() -> proposal                    # ask another member to remove us
 group.apply_pending() / group.discard_pending()
 group.process(message) -> Event
 group.encrypt(data, aad=b"") -> bytes
 group.export_secret(label, context, length) -> bytes
-group.group_id, .epoch, .leaf_index, .cipher_suite, .has_pending_commit, .is_active
+group.group_id, .epoch, .leaf_index, .cipher_suite, .has_pending_commit,
+      .leave_pending, .is_active
 group.members -> [(leaf_index, identity), ...]
 
 Event: kind ("application" | "commit" | "proposal" | "other"), data, aad,
@@ -75,7 +77,7 @@ with `TypeError`; out-of-range values raise `MlsError(code="invalid_argument")`.
 
 `invalid_message`, `invalid_signature`, `invalid_epoch`, `invalid_group_state`,
 `group_already_loaded`, `group_not_found`, `pending_commit`,
-`no_pending_commit`, `commit_required`, `invalid_key_package`,
+`no_pending_commit`, `commit_required`, `leave_pending`, `invalid_key_package`,
 `invalid_welcome`, `invalid_argument`, `input_too_large`, `storage`,
 `unsupported_cipher_suite`, `other`. Messages never contain plaintext, keys or
 internal state.
@@ -113,7 +115,17 @@ reference; they arrive as `kind == "proposal"`. Until someone commits them,
 becomes terminal: `is_active` is false, every other call raises
 `invalid_group_state`, its stored state is deleted, and `load_group` raises
 `group_not_found`. A member cannot remove itself with a commit; another member
-must remove it. A removed client can be re-added with a new key package.
+must remove it (see *Leaving*). A removed client can be re-added with a new
+key package.
+
+**Leaving.** `leave()` returns an RFC 9420 Remove proposal for your own leaf;
+send it to the group. Another member commits it (`commit()` picks it up), and
+processing that commit gives you `Event(removed=True)`. Until then
+`leave_pending` is true and `add`/`remove`/`commit`/`encrypt`/`leave` raise
+`leave_pending`: a commit you made yourself would silently drop your removal.
+The proposal lives only in the current epoch: if a commit arrives that does
+not remove you, `leave_pending` becomes false and you can call `leave()` again.
+Processing your own proposal when the server echoes it back is harmless.
 
 **Sender index.** `sender_index` is an MLS *leaf index*, not an identity. It is
 stable while that member stays in the group, but a leaf freed by a removal can

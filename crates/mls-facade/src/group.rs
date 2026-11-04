@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use mls_rs::{
-    group::{CommitEffect, ProposalSender, ReceivedMessage},
+    group::{proposal::Proposal, CommitEffect, ProposalSender, ReceivedMessage, Sender},
     MlsMessage, WireFormat,
 };
 
@@ -190,7 +190,27 @@ fn no_pending(g: &MlsGroup) -> Result<()> {
             "a commit is pending; apply_pending() or discard_pending() first",
         ));
     }
+    if leave_pending(g) {
+        return Err(Error::new(
+            ErrorCode::LeavePending,
+            "this member proposed to leave; wait for another member's commit",
+        ));
+    }
     Ok(())
+}
+
+/// True if this member's own by-reference Remove proposal for itself is
+/// cached in the current epoch (cleared by the next commit).
+///
+/// While it is, local commits and encryption are refused: upstream silently
+/// drops the leaver's own removal from a commit the leaver makes (pinned in
+/// tests/upstream_probe.rs), so committing would cancel the leave.
+fn leave_pending(g: &MlsGroup) -> bool {
+    let me = g.current_member_index();
+    g.get_cached_proposals().iter().any(|p| {
+        *p.sender() == Sender::Member(me)
+            && matches!(p.proposal(), Proposal::Remove(r) if r.to_remove() == me)
+    })
 }
 
 fn to_bytes(m: &MlsMessage) -> Result<Vec<u8>> {
@@ -232,6 +252,12 @@ impl Group {
     pub fn has_pending_commit(&self) -> Result<bool> {
         let mut st = self.shared.lock()?;
         Ok(st.active()?.has_pending_commit())
+    }
+
+    /// True between `leave()` and the next commit in this group.
+    pub fn leave_pending(&self) -> Result<bool> {
+        let mut st = self.shared.lock()?;
+        Ok(leave_pending(st.active()?))
     }
 
     /// `(leaf_index, identity)` for every current member, by leaf index.
@@ -306,6 +332,27 @@ impl Group {
                 .build()
                 .map_err(|e| map_upstream(Ctx::Local, &e))?;
             Ok((to_bytes(&out.commit_message)?, None))
+        })
+    }
+
+    /// Ask to leave (RFC 9420): a by-reference Remove proposal for our own
+    /// leaf. Another member must commit it; the commit that does yields
+    /// `Event { removed: true }`. If the epoch advances without removing us,
+    /// the proposal is void and `leave()` can be called again.
+    pub fn leave(&self) -> Result<Vec<u8>> {
+        self.shared.mutate(|g| {
+            no_pending(g)?;
+            if g.roster().members_iter().count() < 2 {
+                return Err(Error::new(
+                    ErrorCode::InvalidGroupState,
+                    "no other member can commit the removal",
+                ));
+            }
+            let me = g.current_member_index();
+            let msg = g
+                .propose_remove(me, Vec::new())
+                .map_err(|e| map_upstream(Ctx::Local, &e))?;
+            Ok((to_bytes(&msg)?, None))
         })
     }
 

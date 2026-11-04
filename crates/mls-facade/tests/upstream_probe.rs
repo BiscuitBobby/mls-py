@@ -380,3 +380,73 @@ fn decoder_accepts_what_encoder_refuses() {
     let (_, _ag, _, mut bg) = pair();
     assert!(bg.process_incoming_message(m).is_err());
 }
+
+/// Observed: RFC 9420 leave = a by-reference Remove proposal for one's own
+/// leaf, committed by another member. Upstream caches the leaver's own
+/// proposal, blocks its encrypt with `CommitRequired`, and, if the leaver
+/// commits, silently filters its own removal out (the commit succeeds and the
+/// leaver stays). The facade refuses local commits/encrypt while a leave is
+/// pending for that reason.
+#[test]
+fn self_remove_by_reference_upstream() {
+    use mls_rs::group::proposal::Proposal;
+    let (_, mut ag, _, mut bg) = pair();
+    let me = bg.current_member_index();
+    let p = bg.propose_remove(me, vec![]).unwrap();
+
+    let own: Vec<_> = bg.get_cached_proposals();
+    assert_eq!(own.len(), 1, "leaver caches its own proposal");
+    assert!(matches!(own[0].proposal(), Proposal::Remove(r) if r.to_remove() == me));
+    assert!(matches!(
+        bg.encrypt_application_message(b"x", vec![]),
+        Err(MlsError::CommitRequired)
+    ));
+
+    // Leaver committing: its own removal is filtered out, not an error.
+    let mut bg_copy = bg.clone();
+    let out = bg_copy.commit(vec![]).unwrap();
+    assert!(!out.unused_proposals.is_empty(), "own removal is dropped");
+    drop(bg_copy);
+
+    // Another member commits it: the leaver sees `Removed`.
+    let r = ag.process_incoming_message(rt(&p)).unwrap();
+    assert!(matches!(r, ReceivedMessage::Proposal(_)));
+    let out = ag.commit(vec![]).unwrap();
+    ag.apply_pending_commit().unwrap();
+    assert_eq!(ag.roster().members_iter().count(), 1);
+    match bg
+        .process_incoming_message(rt(&out.commit_message))
+        .unwrap()
+    {
+        ReceivedMessage::Commit(d) => {
+            assert!(matches!(d.effect, CommitEffect::Removed { .. }))
+        }
+        _ => panic!("expected commit"),
+    }
+}
+
+/// Observed: the proposal cache is part of the stored snapshot, so a pending
+/// leave survives `load_group`.
+#[test]
+fn proposal_cache_survives_reload() {
+    let (_, _ag, bob, mut bg) = pair();
+    let me = bg.current_member_index();
+    bg.propose_remove(me, vec![]).unwrap();
+    bg.write_to_storage().unwrap();
+    let gid = bg.group_id().to_vec();
+    drop(bg);
+    let bg = bob.load_group(&gid).unwrap();
+    assert_eq!(bg.get_cached_proposals().len(), 1);
+}
+
+/// Observed: processing the echo of one's own by-reference proposal succeeds
+/// (a `Proposal` event) and does not duplicate the cached proposal.
+#[test]
+fn own_proposal_echo_is_accepted_once() {
+    let (_, _ag, _, mut bg) = pair();
+    let me = bg.current_member_index();
+    let p = bg.propose_remove(me, vec![]).unwrap();
+    let r = bg.process_incoming_message(rt(&p)).unwrap();
+    assert!(matches!(r, ReceivedMessage::Proposal(_)));
+    assert_eq!(bg.get_cached_proposals().len(), 1);
+}

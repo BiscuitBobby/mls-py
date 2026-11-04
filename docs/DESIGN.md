@@ -104,6 +104,9 @@ Supported by the provider: suites 1, 2, 3, 5, 7. The binding allowlists **1**
 | Leaf index of a member is stable while it remains a member; a blanked leaf is reused by later adds | Docs say exactly that (the plan's "not stable across membership changes" was imprecise) |
 | Adding a key package whose signature key matches an existing member is rejected (RFC 9420 uniqueness) | `invalid_key_package` |
 | **Found by fuzzing:** the decoder accepts a proposal with a reserved type 0..=7 that is not compiled in (decoded as "custom"), which the encoder refuses (`decoder_accepts_what_encoder_refuses`) | Fails closed (signature verification re-encodes); facade never panics. Fuzz invariant relaxed to "stable when re-encodable". Worth reporting upstream |
+| A member may propose its own removal by reference; the proposal is cached by the leaver, blocks its `encrypt` with `CommitRequired`, survives a storage round trip, and is committed by another member as an ordinary removal (`self_remove_by_reference_upstream`, `proposal_cache_survives_reload`) | `Group.leave()` (v0.2) sends exactly this RFC 9420 proposal. Upstream's `propose_self_remove` (`SelfRemove`, private code point `0xF003` from the extensions draft) is not used: not interoperable |
+| **If the leaver commits, upstream silently filters its own removal out** of the commit (by-reference proposals are filtered, not errors); the commit succeeds and the leaver stays | While the leaver's own Remove proposal is cached, `add`/`remove`/`commit`/`encrypt`/`leave` raise `leave_pending`; `leave_pending` is derived from the cached proposals, so it survives `load_group` |
+| Processing the echo of one's own proposal succeeds once and does not duplicate the cache entry (`own_proposal_echo_is_accepted_once`) | Documented as harmless |
 
 ### Persistence invariant
 
@@ -136,7 +139,7 @@ is easier to reason about.
 | `Event(kind, data, sender_index, epoch, removed)` | adds `aad` | receivers must see the authenticated data |
 | error codes | adds `group_not_found`, `commit_required`; `unsupported_cipher_suite` always raised by the facade | |
 | — | `group.is_active` | lets apps check terminal state without catching |
-| local self-removal ends in `Removed` | not possible in v0.1: MLS forbids a committer removing itself; another member must remove it (self-remove proposals are out of scope) | RFC 9420 |
+| local self-removal ends in `Removed` | v0.1: not possible, MLS forbids a committer removing itself. v0.2: `leave()` sends a Remove proposal for our own leaf; another member's commit ends in `Removed` | RFC 9420 §12.1.3, §12.2 |
 | `Event` as a `@dataclass(frozen=True)` | Rust `#[pyclass(frozen, eq, hash)]` with a repr that omits contents | immutability without plaintext in logs |
 
 ## 6. Post-quantum spike (recorded, not shipped)

@@ -18,6 +18,7 @@ ErrorCode = Literal[
     "pending_commit",
     "no_pending_commit",
     "commit_required",
+    "leave_pending",
     "invalid_key_package",
     "invalid_welcome",
     "invalid_argument",
@@ -114,6 +115,9 @@ class Group:
     @property
     def has_pending_commit(self) -> bool: ...
     @property
+    def leave_pending(self) -> bool:
+        """True between :meth:`leave` and the next commit in this group."""
+    @property
     def members(self) -> List[Tuple[int, bytes]]:
         """``(leaf_index, identity)`` for each current member."""
     def add(self, key_package: bytes) -> Tuple[bytes, bytes]:
@@ -124,6 +128,15 @@ class Group:
         """
     def remove(self, leaf_index: int) -> bytes:
         """Create a commit removing the member at ``leaf_index`` (pending)."""
+    def leave(self) -> bytes:
+        """Ask to leave: a Remove proposal for our own leaf, to send to the group.
+
+        Another member must commit it; that commit yields
+        ``Event(removed=True)``. Until then ``add``/``remove``/``commit``/
+        ``encrypt`` raise ``leave_pending`` (committing ourselves would drop the
+        removal). A commit that does not remove us voids the proposal; call
+        ``leave()`` again.
+        """
     def commit(self) -> bytes:
         """Create a commit that refreshes our own leaf key (post-compromise
         security) and includes any proposals received by reference (pending)."""
