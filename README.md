@@ -189,4 +189,7 @@ Design decisions and the upstream behaviour they rely on: `docs/DESIGN.md`.
 
 ## License
 
-Apache-2.0.
+Apache-2.0. The wheels also contain statically linked third-party code
+(AWS-LC and the Rust crates in `Cargo.lock`); their licenses and
+notices are in `THIRD_PARTY_NOTICES.txt`, installed with the package under
+`mls_py-<version>.dist-info/licenses/`.

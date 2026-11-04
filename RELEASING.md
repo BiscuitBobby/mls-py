@@ -16,7 +16,9 @@ no API token is stored anywhere.
 ## Each release
 
 1. Run `scripts/verify_deps.sh` and the interop tests; check that
-   `cargo audit`, `scripts/audit_git_pins.sh` and `cargo deny check` are clean.
+   `cargo audit`, `scripts/audit_git_pins.sh` and `cargo deny check` are clean,
+   and that `scripts/gen_notices.sh --check` passes (after a dependency
+   change, regenerate with `scripts/gen_notices.sh` and review the diff).
 2. Set the version in `pyproject.toml`, `Cargo.toml` (`workspace.package`)
    and `python/mls_py/__init__.py`.
 3. Dry run: *Actions → wheels → Run workflow* with `testpypi` checked, then
