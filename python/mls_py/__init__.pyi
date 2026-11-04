@@ -4,7 +4,7 @@ from typing import Callable, Final, Literal, Optional, Tuple, List, Union, final
 __version__: str
 
 SUPPORTED_CIPHER_SUITES: Final[Tuple[int, ...]]
-"""RFC 9420 cipher-suite IDs accepted by this build (classical only in v0.1)."""
+"""RFC 9420 cipher-suite IDs accepted by this build (classical only)."""
 DEFAULT_CIPHER_SUITE: Final[int]
 DEFAULT_MAX_MESSAGE_SIZE: Final[int]
 ERROR_CODES: Final[Tuple[str, ...]]
