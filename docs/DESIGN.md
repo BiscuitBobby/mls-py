@@ -203,6 +203,12 @@ No GitHub remote exists yet, so the GitHub-hosted jobs have not run.
 arm64 (`macos-14`) builds and tests, Windows x64 build and tests, and the
 tag-only `publish` job.
 
+**Recheck after the Welcome-reuse fix and the rename to `mls-py`
+(`ad2d56e`):** x86_64 wheel rebuilt in manylinux_2_28 (1.7 MB, auditwheel
+manylinux_2_28, `Name: mls-py`) and tested 72/72 on Python 3.9-3.14;
+actionlint clean (now incl. `publish-testpypi`). aarch64 and the sdist build
+were not rerun.
+
 ### Earlier checks at the 0.57.0 crates.io release
 
 - Upstream mls-rs 0.57.0 suite under AWS-LC: 435/436 (failure explained in §2).
