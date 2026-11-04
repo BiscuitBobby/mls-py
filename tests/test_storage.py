@@ -66,3 +66,17 @@ def test_many_key_packages(make_client):
     c = make_client(b"c")
     kps = {c.key_package() for _ in range(50)}
     assert len(kps) == 50
+
+
+def test_delete_group(make_client):
+    alice, bob = make_client(b"alice"), make_client(b"bob")
+    ag = alice.create_group()
+    _c, w = ag.add(bob.key_package())
+    ag.apply_pending()
+    bg = bob.join(w)
+    gid = bg.group_id
+    assert code_of(bob.delete_group, gid) == "group_already_loaded"
+    del bg
+    bob.delete_group(gid)
+    assert code_of(bob.load_group, gid) == "group_not_found"
+    assert code_of(bob.delete_group, gid) == "group_not_found"

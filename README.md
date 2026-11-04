@@ -52,6 +52,7 @@ client.key_package() -> bytes                # fresh, single-use
 client.create_group() -> Group
 client.join(welcome: bytes) -> Group
 client.load_group(group_id: bytes) -> Group
+client.delete_group(group_id: bytes)         # discard stored state you know is stale
 
 group.add(key_package) -> (commit, welcome)  # pending
 group.remove(leaf_index) -> commit           # pending
@@ -118,6 +119,14 @@ must remove it. A removed client can be re-added with a new key package.
 **Sender index.** `sender_index` is an MLS *leaf index*, not an identity. It is
 stable while that member stays in the group, but a leaf freed by a removal can
 be reused by a later member. It is `None` for non-member senders.
+
+**Joining a group you already have.** `join()` refuses a Welcome for a
+group id this client already has stored state for, with `invalid_welcome`. Such
+a Welcome is either a replay or a different group reusing the id, and anyone
+who knows a group id can create such a group. Accepting it would silently
+replace your group. If you know the stored group is stale (for example, you
+were removed while offline and have been re-invited), call
+`client.delete_group(group_id)` with no live handle, then join.
 
 **Persistence.** Group state is written to the client's in-memory store after
 every successful operation; `load_group()` re-opens a group once its previous

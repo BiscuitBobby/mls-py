@@ -85,7 +85,15 @@ class Client:
         """A fresh, single-use key package."""
     def create_group(self) -> Group: ...
     def join(self, welcome: bytes) -> Group:
-        """Join from a Welcome; consumes the matching key package."""
+        """Join from a Welcome; consumes the matching key package.
+
+        Raises ``invalid_welcome`` if this client already has stored state
+        for that group id (a replay, or a different group reusing the id);
+        see :meth:`delete_group`.
+        """
+    def delete_group(self, group_id: bytes) -> None:
+        """Delete a stored group that has no live handle (``group_not_found``
+        if there is none, ``group_already_loaded`` while a handle is alive)."""
     def load_group(self, group_id: bytes) -> Group:
         """Re-open a group whose previous handle was released.
 

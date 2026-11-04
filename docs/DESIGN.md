@@ -104,6 +104,7 @@ Supported by the provider: suites 1, 2, 3, 5, 7. The binding allowlists **1**
 | Leaf index of a member is stable while it remains a member; a blanked leaf is reused by later adds | Docs say exactly that (the plan's "not stable across membership changes" was imprecise) |
 | Adding a key package whose signature key matches an existing member is rejected (RFC 9420 uniqueness) | `invalid_key_package` |
 | **Found by fuzzing:** the decoder accepts a proposal with a reserved type 0..=7 that is not compiled in (decoded as "custom"), which the encoder refuses (`decoder_accepts_what_encoder_refuses`) | Fails closed (signature verification re-encodes); facade never panics. Fuzz invariant relaxed to "stable when re-encodable". Worth reporting upstream |
+| `join_group` accepts a Welcome for a group id the client already stores, and writing it replaces the stored group. Anyone who knows a group id can create a different group with that id (`welcome_reusing_a_stored_group_id_is_refused`). Upstream also writes the joined group *before* deleting the consumed key package, so a crash in between allows a replay | `join()` refuses a Welcome when stored state exists for its group id (`invalid_welcome`), checked before anything is written; `Client.delete_group()` lets the app discard state it knows is stale. Previously only a live handle was checked |
 
 ### Persistence invariant
 

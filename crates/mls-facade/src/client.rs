@@ -46,6 +46,14 @@ impl ClientInner {
             .map_err(|_| Error::new(ErrorCode::Other, "internal lock poisoned"))
     }
 
+    pub(crate) fn is_stored(&self, group_id: &[u8]) -> Result<bool> {
+        use mls_rs::GroupStateStorage;
+        self.storage
+            .state(group_id)
+            .map(|s| s.is_some())
+            .map_err(|_| Error::new(ErrorCode::Storage, "reading stored group state failed"))
+    }
+
     pub(crate) fn check_size(&self, input: &[u8]) -> Result<()> {
         if input.len() > self.max_message_size {
             return Err(Error::new(
@@ -220,14 +228,39 @@ impl Client {
         Ok(Group::from_shared(shared))
     }
 
+    /// Delete a stored group this client no longer wants, e.g. one it was
+    /// removed from while offline, so that a new Welcome for it can be
+    /// joined. Refused while a live, active handle exists.
+    pub fn delete_group(&self, group_id: &[u8]) -> Result<()> {
+        let registry = self.inner.registry()?;
+        if let Some(existing) = registry.get(group_id).and_then(Weak::upgrade) {
+            if existing.lifecycle()? == Lifecycle::Active {
+                return Err(Error::new(
+                    ErrorCode::GroupAlreadyLoaded,
+                    "a live handle for this group exists",
+                ));
+            }
+        }
+        if !self.inner.is_stored(group_id)? {
+            return Err(Error::new(ErrorCode::GroupNotFound, "group not found"));
+        }
+        self.inner.storage.delete_group(group_id);
+        Ok(())
+    }
+
     /// Persist and register a freshly created/joined group. A Welcome for a group that
     /// still has a live *active* handle is refused; a live handle in a
     /// terminal state (e.g. removed) is superseded, which is how rejoining
     /// after removal works.
     ///
-    /// The registry is checked *before* anything is written, so a refused
-    /// Welcome neither overwrites the live group's stored state nor consumes
-    /// the key package.
+    /// A Welcome for a group id that already has *stored* state is refused
+    /// too: it is either a replay or a different group reusing the id
+    /// (anyone who knows the id can create one). Installing it would
+    /// silently replace the stored group. The app decides, via
+    /// `delete_group`, when stored state is stale.
+    ///
+    /// Everything is checked *before* anything is written, so a refused
+    /// Welcome neither overwrites stored state nor consumes the key package.
     fn install(&self, mut group: crate::group::MlsGroup) -> Result<Group> {
         let group_id = group.group_id().to_vec();
         let mut registry = self.inner.registry()?;
@@ -239,6 +272,12 @@ impl Client {
                     "a live, active handle for this group already exists",
                 ));
             }
+        }
+        if self.inner.is_stored(&group_id)? {
+            return Err(Error::new(
+                ErrorCode::InvalidWelcome,
+                "this client already has stored state for this group; delete_group() it first if it is stale",
+            ));
         }
         // For a join, writing state is what deletes the consumed key
         // package's private keys from the key-package store (observed
