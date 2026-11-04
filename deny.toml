@@ -1,0 +1,33 @@
+[graph]
+all-features = false
+
+[advisories]
+# Every advisory (vulnerability, unmaintained, unsound, yanked) fails the check.
+yanked = "deny"
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-3-Clause",
+    "ISC",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "Unlicense",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"   # only syn 2/3 today (proc-macro); verify_deps.sh fails on mls-rs/aws-lc duplicates
+wildcards = "deny"
+allow-wildcard-paths = true   # internal, unpublished workspace crates (publish = false)
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# mls-rs is pinned to one commit (Cargo.toml); no other git sources allowed.
+allow-git = ["https://github.com/awslabs/mls-rs"]
