@@ -11,6 +11,8 @@
 #   scripts/ci_local.sh sdist-test
 #
 # Output: $CI_OUT (default ./dist-ci). Cargo/rustup caches: $CI_CACHE.
+# Extra `docker run` arguments: $CI_DOCKER_ARGS (e.g. to force IPv4 with
+# "--sysctl net.ipv6.conf.all.disable_ipv6=1" on hosts with broken IPv6).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$PWD
@@ -20,13 +22,14 @@ MATURIN_VERSION=1.15.0            # keep in sync with wheels.yml
 RUST_TOOLCHAIN=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
 PYTHONS=(3.9 3.10 3.11 3.12 3.13 3.14)
 mkdir -p "$OUT" "$CACHE"
+read -r -a DOCKER_ARGS <<< "${CI_DOCKER_ARGS:-}"
 
 platform_for() { case "$1" in x86_64) echo linux/amd64 ;; aarch64) echo linux/arm64 ;; *) echo "unknown arch $1" >&2; exit 2 ;; esac; }
 
 build() {
   local arch=$1 plat; plat=$(platform_for "$arch")
   mkdir -p "$CACHE/$arch/home" "$OUT/$arch"
-  docker run --rm --platform "$plat" --user "$(id -u):$(id -g)" \
+  docker run --rm "${DOCKER_ARGS[@]}" --platform "$plat" --user "$(id -u):$(id -g)" \
     -e HOME=/home/ci -e CARGO_TARGET_DIR=/home/ci/target \
     -v "$CACHE/$arch/home":/home/ci -v "$ROOT":/io:ro -v "$OUT/$arch":/out -w /io \
     "quay.io/pypa/manylinux_2_28_$arch" bash -euc "
@@ -53,7 +56,7 @@ test_wheels() {
     # Official python images: a clean interpreter per version; the repo's
     # tests are mounted read-only, the wheel is installed from file only.
     # Like the CI matrix (fail-fast: false), keep going and report at the end.
-    docker run --rm --platform "$plat" \
+    docker run --rm "${DOCKER_ARGS[@]}" --platform "$plat" \
       -v "$ROOT/tests":/tests:ro -v "$OUT/$arch":/wheels:ro \
       "python:$py-slim" sh -euc "
         python -m venv /venv
@@ -80,7 +83,7 @@ sdist() {
 sdist_test() {
   # Build from the sdist in a clean Python 3.12 container with only a Rust
   # toolchain and a C toolchain/cmake added (what a source install needs).
-  docker run --rm -v "$ROOT/tests":/tests:ro -v "$OUT/sdist":/sdist:ro \
+  docker run --rm "${DOCKER_ARGS[@]}" -v "$ROOT/tests":/tests:ro -v "$OUT/sdist":/sdist:ro \
     python:3.12 bash -euc "
       apt-get update -qq && apt-get install -y -qq cmake >/dev/null
       curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null
@@ -95,5 +98,5 @@ case "${1:-}" in
   test) test_wheels "${2:?arch}" ;;
   sdist) sdist ;;
   sdist-test) sdist_test ;;
-  *) sed -n '2,14p' "$0"; exit 2 ;;
+  *) sed -n '2,15p' "$0"; exit 2 ;;
 esac
