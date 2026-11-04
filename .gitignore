@@ -1,0 +1,17 @@
+/target
+/fuzz/target
+/fuzz/corpus
+/fuzz/artifacts
+/fuzz/coverage
+/interop/target
+/.venv
+/dist
+__pycache__/
+*.so
+*.pyd
+.pytest_cache/
+.hypothesis/
+/dist-ci
+
+# Local-only tests (never committed)
+/crates/mls-facade/tests/local_*.rs
