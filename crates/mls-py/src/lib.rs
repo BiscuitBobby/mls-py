@@ -199,6 +199,12 @@ impl Client {
         Ok(Group { inner: g })
     }
 
+    /// Delete a stored group (no live handle may exist), e.g. one this client
+    /// was removed from while offline, so a new Welcome for it can be joined.
+    fn delete_group(&self, py: Python<'_>, group_id: PyBackedBytes) -> PyResult<()> {
+        call(py, || self.inner.delete_group(&group_id))
+    }
+
     fn __repr__(&self) -> String {
         format!("<mls_py.Client cipher_suite={}>", self.inner.cipher_suite())
     }
