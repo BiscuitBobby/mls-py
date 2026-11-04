@@ -21,6 +21,9 @@ jobs:
       - name: Advisories for git-pinned mls-rs crates (invisible to cargo audit)
         run: scripts/audit_git_pins.sh
       - run: cargo deny check
+      - run: cargo install --locked --features cli cargo-about@0.9.2
+      - name: THIRD_PARTY_NOTICES.txt matches Cargo.lock
+        run: scripts/gen_notices.sh --check
 
   fuzz-smoke:
     runs-on: ubuntu-latest
