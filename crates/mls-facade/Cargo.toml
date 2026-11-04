@@ -11,3 +11,9 @@ publish = false
 mls-rs = { workspace = true }
 mls-rs-crypto-awslc = { workspace = true }
 mls-rs-core = { workspace = true }
+mls-rs-provider-sqlite = { workspace = true }
+rusqlite = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

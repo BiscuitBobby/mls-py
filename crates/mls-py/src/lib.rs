@@ -7,6 +7,7 @@
 //! facade lock is held.
 
 use std::cell::Cell;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use mls_facade as facade;
@@ -123,13 +124,14 @@ struct Client {
 #[pymethods]
 impl Client {
     #[new]
-    #[pyo3(signature = (identity, *, cipher_suite = None, max_message_size = None, verifier = None))]
+    #[pyo3(signature = (identity, *, cipher_suite = None, max_message_size = None, verifier = None, storage = None))]
     fn new(
         py: Python<'_>,
         identity: PyBackedBytes,
         cipher_suite: Option<&Bound<'_, PyAny>>,
         max_message_size: Option<&Bound<'_, PyAny>>,
         verifier: Option<&Bound<'_, PyAny>>,
+        storage: Option<PathBuf>,
     ) -> PyResult<Self> {
         let cs: u16 = match cipher_suite {
             Some(o) => int_arg(o, "cipher_suite out of range").map_err(|e| {
@@ -163,6 +165,7 @@ impl Client {
             cipher_suite: cs,
             max_message_size: max,
             verifier,
+            storage,
         };
         let inner = call(py, || facade::Client::with_options(&identity, options))?;
         Ok(Self { inner })
@@ -197,6 +200,12 @@ impl Client {
     fn load_group(&self, py: Python<'_>, group_id: PyBackedBytes) -> PyResult<Group> {
         let g = call(py, || self.inner.load_group(&group_id))?;
         Ok(Group { inner: g })
+    }
+
+    /// Ids of the groups in this client's store (e.g. after a restart).
+    fn group_ids<'py>(&self, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyBytes>>> {
+        let ids = call(py, || self.inner.group_ids())?;
+        Ok(ids.into_iter().map(|id| bytes(py, id)).collect())
     }
 
     /// Delete a stored group (no live handle may exist), e.g. one this client

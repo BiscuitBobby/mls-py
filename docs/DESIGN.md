@@ -38,6 +38,8 @@ changed, and the facade does not implement that trait. Consequences:
 | mls-rs-crypto-awslc | 0.27.0 @ `6c819ef` (git) | | default `non-fips`; post-quantum feature off (out of scope) |
 | aws-lc-rs | 1.18.1 | | **pinned exactly by the provider** (`=1.18.1`, upstream issue #408); 1.18.2 and 1.19.0 exist but cannot be taken without a provider release |
 | mls-rs-crypto-traits | 0.22.0 | | single copy |
+| mls-rs-provider-sqlite | 0.23.0 @ `6c819ef` (git) | | v0.2 durable storage. `default-features = false, features = ["sqlite-bundled"]`: upstream's default is SQLCipher, which needs OpenSSL as a second crypto library |
+| rusqlite / libsqlite3-sys | 0.37.0 / 0.35.0 | | bundled SQLite (compiled with `SQLITE_DEFAULT_FOREIGN_KEYS=1`, see §4); same major as the provider's |
 | pyo3 | =0.30.1 | 2026-10-14 | `abi3-py39` |
 | maturin | 1.15.0 (CI pin), `>=1.9,<2` (build-system) | 2026-08-24 | 1.16.0 skipped: under two weeks old at the gate |
 
@@ -84,7 +86,8 @@ Supported by the provider: suites 1, 2, 3, 5, 7. The binding allowlists **1**
 | External commits | disabled, GroupInfo never published | out of scope |
 | Handshake encryption | **commits and proposals are PrivateMessage** (`encrypt_control_messages = true`; upstream default is PublicMessage) | the delivery service sees group id, epoch and content type (enough to sequence commits) but not membership changes; also required to interoperate with OpenMLS's default policy, which rejects plaintext handshakes from members |
 | Padding | upstream default `StepFunction` | |
-| Prior-epoch retention | 3 epochs (in-memory store default) | late messages from the last 3 epochs decrypt; older secrets are dropped |
+| Prior-epoch retention | 3 epochs (set explicitly for both backends; upstream's default for each) | late messages from the last 3 epochs decrypt; older secrets are dropped |
+| Storage | process memory (default) or, v0.2, one SQLite file per client holding the signing key, key packages and group state | durable file is unencrypted at rest, owner-only, locked, `synchronous=FULL`, `secure_delete=ON`, `foreign_keys=ON` (see persistence invariant) |
 | Key package lifetime | upstream default (365 days) | |
 
 ## 4. Observed upstream behaviour → facade decision
@@ -108,12 +111,13 @@ Supported by the provider: suites 1, 2, 3, 5, 7. The binding allowlists **1**
 | **If the leaver commits, upstream silently filters its own removal out** of the commit (by-reference proposals are filtered, not errors); the commit succeeds and the leaver stays | While the leaver's own Remove proposal is cached, `add`/`remove`/`commit`/`encrypt`/`leave` raise `leave_pending`; `leave_pending` is derived from the cached proposals, so it survives `load_group` |
 | Processing the echo of one's own proposal succeeds once and does not duplicate the cache entry (`own_proposal_echo_is_accepted_once`) | Documented as harmless |
 | `join_group` accepts a Welcome for a group id the client already stores, and writing it replaces the stored group. Anyone who knows a group id can create a different group with that id (`welcome_reusing_a_stored_group_id_is_refused`). Upstream also writes the joined group *before* deleting the consumed key package, so a crash in between allows a replay | `join()` refuses a Welcome when stored state exists for its group id (`invalid_welcome`), checked before anything is written; `Client.delete_group()` lets the app discard state it knows is stale. Fixes a v0.1 gap: v0.1 checked only for a live handle |
+| Upstream's SQLite schema removes a deleted group's epoch rows only through `ON DELETE CASCADE`, and never enables foreign keys. It works with the bundled SQLite only because libsqlite3-sys compiles `SQLITE_DEFAULT_FOREIGN_KEYS=1`; with SQLite's default (off) the prior-epoch secrets stay in the file (`upstream_epoch_cleanup_depends_on_build_default`) | The facade's connection strategy sets `foreign_keys=ON` and fails if it does not take effect. `removal_deletes_group_and_epochs_from_disk` checks the tables after a removal |
 
 ### Persistence invariant
 
-Whenever a group's lock is released, the in-memory store holds exactly the
-in-memory group state: persist on success, restore on failure, delete on
-terminal transitions. Consequences:
+Whenever a group's lock is released, the store holds exactly the in-memory
+group state: persist on success, restore on failure, delete on terminal
+transitions. Consequences:
 
 - `load_group()` never returns a stale snapshot, so a reloaded group cannot
   re-use sender-ratchet generations.
@@ -126,10 +130,33 @@ Cost: one snapshot serialization per successful operation. Measured
 application message costs about 5 ms for encrypt + process combined (both
 sides persist the full state); Welcome 174 KB, largest add-commit 98 KB,
 self-update commit 41 KB; building the group one add per commit took 31 s.
-If this becomes a bottleneck, the safe optimization is to persist
-application-message ratchet changes lazily (on handle release) while still
-persisting every epoch change; not done in v0.1 because the simple invariant
-is easier to reason about.
+With the durable backend (v0.2) every successful operation is also on disk
+before it returns (`synchronous=FULL`, rollback journal). That ordering is
+what prevents a crash from rolling a sender ratchet back behind ciphertext
+that already left the process (RFC 9420 §6.3.1: lost or corrupted state can
+reuse a generation; the reuse guard only mitigates nonce reuse). Measured on
+ext4 (x86_64, release, suite 1, two members): 5.9 ms per application message
+(encrypt + process, sender durable) against 0.06 ms in memory, i.e. one disk
+sync per state-changing call. Persisting ratchet changes lazily would be
+faster but is **not** safe with durable storage for that reason.
+
+Durable-file hygiene:
+
+- `foreign_keys=ON`, set on every connection and checked: upstream's schema
+  needs it for `delete_group` to cascade to the prior-epoch rows (see §4).
+- `secure_delete=ON`: deleted rows are overwritten in the database file
+  (`deleted_group_is_gone_from_the_file` checks the bytes). Rollback-journal
+  copies, filesystem free space and backups are outside SQLite's control, so
+  the README says to keep the file on an encrypted volume.
+- The database and its `.lock` file are created `0600` on Unix (SQLite gives
+  journals the database file's mode). An exclusive `File::try_lock` on the
+  lock file, held for the client's lifetime including its groups, prevents
+  two clients in any process from using one file. Two clients on one
+  database would each keep their own live handles and diverge.
+- The client record (identity, suite, signature key pair) is written in one
+  transaction under `mls_py.v1.*` keys of upstream's key-value table. It
+  binds the file to that identity and suite. Expired key packages are
+  deleted on open.
 
 ## 5. Deviations from the approved plan (all gate-driven)
 
@@ -140,6 +167,7 @@ is easier to reason about.
 | `Event(kind, data, sender_index, epoch, removed)` | adds `aad` | receivers must see the authenticated data |
 | error codes | adds `group_not_found`, `commit_required`; `unsupported_cipher_suite` always raised by the facade; v0.2 adds `leave_pending` and `identity_rejected` (only for the application verifier's rejection, recognised by downcasting upstream's `IdentityProviderError`) | |
 | — | `group.is_active` | lets apps check terminal state without catching |
+| storage: in-memory only, durable storage a non-goal | v0.2: optional SQLite file (`Client(storage=...)`), `client.group_ids()`, `client.delete_group()` | the main practical limit of v0.1; built on upstream's provider with the hardening above |
 | local self-removal ends in `Removed` | v0.1: not possible, MLS forbids a committer removing itself. v0.2: `leave()` sends a Remove proposal for our own leaf; another member's commit ends in `Removed` | RFC 9420 §12.1.3, §12.2 |
 | `Event` as a `@dataclass(frozen=True)` | Rust `#[pyclass(frozen, eq, hash)]` with a repr that omits contents | immutability without plaintext in logs |
 

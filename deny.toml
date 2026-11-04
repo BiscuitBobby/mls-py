@@ -16,6 +16,7 @@ allow = [
     "CC0-1.0",
     "Unicode-3.0",
     "Unlicense",
+    "Zlib",          # foldhash (hashbrown <- hashlink <- rusqlite); permissive, OSI
 ]
 confidence-threshold = 0.9
 

@@ -11,6 +11,7 @@ mod client;
 mod error;
 mod group;
 mod identity;
+mod storage;
 
 pub use client::{Client, ClientOptions};
 pub use error::{Error, ErrorCode, Result};

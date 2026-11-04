@@ -1,13 +1,15 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
 use mls_rs::{
     client_builder::{
-        BaseConfig, PaddingMode, WithCryptoProvider, WithIdentityProvider, WithMlsRules,
+        BaseConfig, PaddingMode, WithCryptoProvider, WithGroupStateStorage, WithIdentityProvider,
+        WithKeyPackageRepo, WithMlsRules,
     },
+    crypto::{SignaturePublicKey, SignatureSecretKey},
     identity::{basic::BasicCredential, SigningIdentity},
     mls_rules::{CommitOptions, DefaultMlsRules, EncryptionOptions},
-    storage_provider::in_memory::InMemoryGroupStateStorage,
     CipherSuite, CipherSuiteProvider, CryptoProvider, MlsMessage, WireFormat,
 };
 use mls_rs_crypto_awslc::AwsLcCryptoProvider;
@@ -15,13 +17,20 @@ use mls_rs_crypto_awslc::AwsLcCryptoProvider;
 use crate::error::{map_upstream, Ctx, Error, ErrorCode, Result};
 use crate::group::{Group, GroupShared, Lifecycle};
 use crate::identity::{FacadeIdentityProvider, MemberVerifier};
+use crate::storage::{Backend, GroupStore, StoredIdentity};
 use crate::{limits, DEFAULT_CIPHER_SUITE, DEFAULT_MAX_MESSAGE_SIZE, SUPPORTED_CIPHER_SUITES};
 
 pub(crate) type Config = WithMlsRules<
     DefaultMlsRules,
     WithCryptoProvider<
         AwsLcCryptoProvider,
-        WithIdentityProvider<FacadeIdentityProvider, BaseConfig>,
+        WithIdentityProvider<
+            FacadeIdentityProvider,
+            WithKeyPackageRepo<
+                crate::storage::KeyStore,
+                WithGroupStateStorage<GroupStore, BaseConfig>,
+            >,
+        >,
     >,
 >;
 
@@ -31,7 +40,10 @@ pub(crate) struct ClientInner {
     pub(crate) mls: MlsClient,
     pub(crate) cipher_suite: u16,
     pub(crate) max_message_size: usize,
-    pub(crate) storage: InMemoryGroupStateStorage,
+    pub(crate) storage: GroupStore,
+    /// Keeps the storage lock (durable backend) for as long as the client or
+    /// any of its groups is alive.
+    _backend: Backend,
     /// One live handle per group id. Lock order: registry, then a group's
     /// state lock. Never take the registry lock while holding a group lock.
     registry: Mutex<HashMap<Vec<u8>, Weak<GroupShared>>>,
@@ -72,6 +84,9 @@ pub struct ClientOptions {
     /// Application policy for every credential the client's groups accept.
     /// `None` accepts any well-formed BasicCredential (unverified labels).
     pub verifier: Option<Arc<dyn MemberVerifier>>,
+    /// `None`: process-local memory. `Some(path)`: a durable SQLite file
+    /// holding this client's signing key, key packages and group state.
+    pub storage: Option<PathBuf>,
 }
 
 impl Default for ClientOptions {
@@ -80,12 +95,13 @@ impl Default for ClientOptions {
             cipher_suite: DEFAULT_CIPHER_SUITE,
             max_message_size: DEFAULT_MAX_MESSAGE_SIZE,
             verifier: None,
+            storage: None,
         }
     }
 }
 
 /// An MLS client: one identity, one signing key, one cipher suite, and a
-/// process-local in-memory store for key packages and group state.
+/// store for key packages and group state (memory or a SQLite file).
 #[derive(Clone)]
 pub struct Client {
     inner: Arc<ClientInner>,
@@ -108,6 +124,7 @@ impl Client {
             cipher_suite,
             max_message_size,
             verifier,
+            storage,
         } = options;
         if identity.is_empty() || identity.len() > limits::MAX_IDENTITY_LEN {
             return Err(Error::new(
@@ -143,9 +160,46 @@ impl Client {
             ErrorCode::UnsupportedCipherSuite,
             "cipher suite not available from the crypto provider",
         ))?;
-        let (secret, public) = csp
-            .signature_key_generate()
-            .map_err(|_| Error::new(ErrorCode::Other, "signature key generation failed"))?;
+        let backend = match &storage {
+            None => Backend::memory()?,
+            Some(path) => Backend::sqlite(path)?,
+        };
+        // A durable store belongs to one identity and keeps its signing key,
+        // so members (and their verifiers) see the same key after a restart.
+        let (secret, public) = match backend.load_identity()? {
+            Some(stored) => {
+                if stored.identity != identity {
+                    return Err(Error::new(
+                        ErrorCode::InvalidArgument,
+                        "storage belongs to a different identity",
+                    ));
+                }
+                if stored.cipher_suite != cipher_suite {
+                    return Err(Error::new(
+                        ErrorCode::InvalidArgument,
+                        "storage was created for a different cipher suite",
+                    ));
+                }
+                (
+                    SignatureSecretKey::new_slice(&stored.secret_key),
+                    SignaturePublicKey::new(stored.public_key),
+                )
+            }
+            None => {
+                let (secret, public) = csp
+                    .signature_key_generate()
+                    .map_err(|_| Error::new(ErrorCode::Other, "signature key generation failed"))?;
+                if backend.is_durable() {
+                    backend.save_identity(&StoredIdentity {
+                        identity: identity.to_vec(),
+                        cipher_suite,
+                        public_key: public.as_bytes().to_vec(),
+                        secret_key: secret.as_bytes().to_vec().into(),
+                    })?;
+                }
+                (secret, public)
+            }
+        };
         let credential = BasicCredential::new(identity.to_vec()).into_credential();
 
         // Every commit carries an UpdatePath, so the committer always refreshes
@@ -165,19 +219,20 @@ impl Client {
             .with_encryption_options(EncryptionOptions::new(true, PaddingMode::StepFunction));
 
         let mls = mls_rs::Client::builder()
+            .group_state_storage(backend.groups.clone())
+            .key_package_repo(backend.keys.clone())
             .identity_provider(FacadeIdentityProvider::new(verifier))
             .crypto_provider(provider)
             .mls_rules(rules)
             .signing_identity(SigningIdentity::new(credential, public), secret, cs)
             .build();
-        let storage = mls.group_state_storage();
-
         Ok(Self {
             inner: Arc::new(ClientInner {
                 mls,
                 cipher_suite,
                 max_message_size,
-                storage,
+                storage: backend.groups.clone(),
+                _backend: backend,
                 registry: Mutex::new(HashMap::new()),
             }),
         })
@@ -189,6 +244,11 @@ impl Client {
 
     pub fn max_message_size(&self) -> usize {
         self.inner.max_message_size
+    }
+
+    /// Ids of the groups in this client's store, sorted.
+    pub fn group_ids(&self) -> Result<Vec<Vec<u8>>> {
+        self.inner.storage.group_ids()
     }
 
     /// A fresh, single-use key package. Its private keys stay in this
@@ -279,8 +339,7 @@ impl Client {
         if !self.inner.is_stored(group_id)? {
             return Err(Error::new(ErrorCode::GroupNotFound, "group not found"));
         }
-        self.inner.storage.delete_group(group_id);
-        Ok(())
+        self.inner.storage.delete_group(group_id)
     }
 
     /// Persist and register a freshly created/joined group. A Welcome for a group that
@@ -289,7 +348,9 @@ impl Client {
     /// after removal works.
     ///
     /// A Welcome for a group id that already has *stored* state is refused
-    /// too: it is either a replay or a different group reusing the id
+    /// too: it is either a replay (possible if the process died between
+    /// writing a joined group and deleting the consumed key package, which
+    /// upstream does in that order) or a different group reusing the id
     /// (anyone who knows the id can create one). Installing it would
     /// silently replace the stored group. The app decides, via
     /// `delete_group`, when stored state is stale.

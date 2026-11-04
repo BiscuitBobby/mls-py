@@ -1,4 +1,5 @@
-from typing import Callable, Final, Literal, Optional, Tuple, List, final
+import os
+from typing import Callable, Final, Literal, Optional, Tuple, List, Union, final
 
 __version__: str
 
@@ -65,7 +66,7 @@ class Event:
 
 @final
 class Client:
-    """One identity, one signing key, one cipher suite, in-memory storage."""
+    """One identity, one signing key, one cipher suite, one store."""
 
     def __init__(
         self,
@@ -74,6 +75,7 @@ class Client:
         cipher_suite: int = 1,
         max_message_size: int = 16 * 2**20,
         verifier: Optional[Callable[[bytes, bytes], bool]] = None,
+        storage: Optional[Union[str, os.PathLike[str]]] = None,
     ) -> None:
         """``identity`` is a BasicCredential label (1..=256 bytes).
 
@@ -87,6 +89,12 @@ class Client:
         ``identity_rejected`` and leaves state unchanged. It must not call
         mls_py (``RuntimeError``) and should not reference this client.
         Without a verifier, identities are unverified labels.
+
+        ``storage`` is a SQLite file holding this client's signing key, key
+        packages and group state (owner-only permissions, unencrypted:
+        protect it like a private key). It is bound to ``identity`` and
+        ``cipher_suite`` and locked while the client or any of its groups is
+        alive. ``None`` keeps everything in process memory.
         """
     @property
     def cipher_suite(self) -> int: ...
@@ -102,6 +110,8 @@ class Client:
         for that group id (a replay, or a different group reusing the id);
         see :meth:`delete_group`.
         """
+    def group_ids(self) -> List[bytes]:
+        """Ids of the groups in this client's store, sorted."""
     def delete_group(self, group_id: bytes) -> None:
         """Delete a stored group that has no live handle (``group_not_found``
         if there is none, ``group_already_loaded`` while a handle is alive)."""
@@ -114,9 +124,9 @@ class Client:
 
 @final
 class Group:
-    """Handle to one MLS group. State is saved in the client's in-memory
-    store after every successful operation; a failed operation leaves the
-    state unchanged."""
+    """Handle to one MLS group. State is saved in the client's store after
+    every successful operation; a failed operation leaves the state
+    unchanged."""
 
     @property
     def group_id(self) -> bytes: ...

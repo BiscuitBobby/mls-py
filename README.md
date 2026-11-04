@@ -17,7 +17,7 @@ pip install mls_py
 
 CI builds abi3 wheels (CPython 3.9+) for Linux x86_64/aarch64 (manylinux_2_28, glibc
 2.28+), macOS x86_64 and arm64 (separate wheels), Windows x64. Building from
-source needs a Rust toolchain (1.85+), cmake, a C compiler (for AWS-LC) and
+source needs a Rust toolchain (1.89+), cmake, a C compiler (for AWS-LC) and
 network access to github.com: mls-rs is pinned to an upstream git commit
 (see `docs/DESIGN.md` §1).
 
@@ -47,8 +47,10 @@ assert group.export_secret(b"my-app/v1", b"", 32) == bob_group.export_secret(b"m
 ```python
 SUPPORTED_CIPHER_SUITES: tuple[int, ...]     # (1, 2) in v0.1; classical only
 Client(identity: bytes, *, cipher_suite: int = 1, max_message_size: int = 16 * 2**20,
-       verifier: Callable[[bytes, bytes], bool] | None = None)
+       verifier: Callable[[bytes, bytes], bool] | None = None,
+       storage: str | os.PathLike | None = None)  # None: process memory
 client.cipher_suite, client.max_message_size
+client.group_ids() -> [group_id, ...]        # groups in this client's store
 client.key_package() -> bytes                # fresh, single-use
 client.create_group() -> Group
 client.join(welcome: bytes) -> Group
@@ -161,12 +163,40 @@ replace your group. If you know the stored group is stale (for example, you
 were removed while offline and have been re-invited), call
 `client.delete_group(group_id)` with no live handle, then join.
 
-**Persistence.** Group state is written to the client's in-memory store after
-every successful operation; `load_group()` re-opens a group once its previous
-handle has been released (only one live handle per group, otherwise
-`group_already_loaded`). Storage is **process-local and not durable**: it
-does not persist application queues, does not coordinate with your transport,
-and is lost when the process exits.
+**Persistence.** Group state is written to the client's store after every
+successful operation, before the operation returns its output.
+`load_group()` re-opens a group once its previous handle has been released.
+Only one live handle per group is allowed, otherwise `group_already_loaded`.
+
+- **Default (`storage=None`):** process memory, lost when the process exits.
+- **Durable (`storage="alice.db"`):** a SQLite file holding the client's
+  signing key, unused key packages and group state.
+  - Reopening `Client(b"alice", storage="alice.db")` after a restart restores
+    the same signing key. `client.group_ids()` lists the stored groups, and
+    `load_group()` continues where you left off.
+  - The file is bound to one identity and cipher suite. Opening it with
+    others raises `invalid_argument`.
+  - It is locked (`<file>.lock`) while the client or any of its groups is
+    alive, so a second client on the same file, in this process or another,
+    raises `storage`.
+  - Writes are synchronous (`synchronous=FULL`), so a crash cannot roll state
+    back to before a message you already sent. The cost is one disk sync per
+    state-changing call, including every `encrypt`.
+
+The store does not persist your application's queues and does not coordinate
+with your transport. In particular, **pending commit bytes are not stored**.
+After a crash with a commit pending, `has_pending_commit` is true after
+reload; call `discard_pending()` unless you still have the bytes.
+
+**Protect the storage file like a private key.**
+- It is **not encrypted**. It holds the signing key and the group secrets of
+  the current and last 3 epochs.
+- It is created owner-only (`0600`) on Unix. On Windows it inherits the
+  directory's ACL.
+- Deleted rows are overwritten in the file (`secure_delete`). Copies can
+  still survive in deleted journal files, in filesystem free space and in
+  backups, so keep it on an encrypted volume and out of synced or backed-up
+  folders.
 
 **Exported secrets.** Use a distinct label per purpose, feed the output into a
 defined derivation scheme rather than using it directly as a general-purpose
@@ -197,8 +227,9 @@ calls on one group are serialized internally. Groups outlive their `Client`.
   content type, message sizes (padded) and `aad`, which is authenticated but
   **not encrypted**. Key packages and Welcomes reveal what they must (identity,
   public keys).
-- **No durable storage**, no raw state export. Your app owns delivery,
-  ordering, retries and persistence.
+- **Durable storage is opt-in and unencrypted at rest** (see *Persistence*).
+  There is no raw state export. Your app owns delivery, ordering, retries,
+  and persistence of its own data.
 - Signing keys never reach Python. Secrets inside mls-rs/AWS-LC are zeroized
   where upstream supports it; plaintext and exported secrets returned to Python
   are ordinary `bytes` and are **not** securely erased.

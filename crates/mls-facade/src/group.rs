@@ -60,10 +60,10 @@ impl GroupShared {
 
     /// Move to a terminal state: drop the upstream group and delete the
     /// stored state so the group cannot be revived through `load_group`.
-    fn terminate(&self, st: &mut GroupState, lifecycle: Lifecycle) {
+    fn terminate(&self, st: &mut GroupState, lifecycle: Lifecycle) -> Result<()> {
         st.group = None;
         st.lifecycle = lifecycle;
-        self.client.storage.delete_group(&self.group_id);
+        self.client.storage.delete_group(&self.group_id)
     }
 
     /// Persist after every successful state change. This bounds prior-epoch
@@ -76,7 +76,7 @@ impl GroupShared {
             None => false,
         };
         if failed {
-            self.terminate(st, Lifecycle::Invalid);
+            let _ = self.terminate(st, Lifecycle::Invalid);
             return Err(Error::new(
                 ErrorCode::Storage,
                 "persisting group state failed; group is now invalid",
@@ -92,7 +92,9 @@ impl GroupShared {
     fn restore(&self, st: &mut GroupState) {
         match self.client.mls.load_group(&self.group_id) {
             Ok(g) => st.group = Some(g),
-            Err(_) => self.terminate(st, Lifecycle::Invalid),
+            Err(_) => {
+                let _ = self.terminate(st, Lifecycle::Invalid);
+            }
         }
     }
 
@@ -111,7 +113,14 @@ impl GroupShared {
                 Ok(value)
             }
             Ok((value, Some(terminal))) => {
-                self.terminate(&mut st, terminal);
+                // The transition stands either way; a failed delete is
+                // reported so the app knows stale state is left on disk.
+                self.terminate(&mut st, terminal).map_err(|_| {
+                    Error::new(
+                        ErrorCode::Storage,
+                        "group ended (e.g. removed), but deleting its stored state failed",
+                    )
+                })?;
                 Ok(value)
             }
             Err(e) => {
