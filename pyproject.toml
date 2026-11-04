@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "mls_py"
-version = "0.1.0"
+version = "0.2.0"
 description = "Minimal Python binding for mls-rs, an implementation of Messaging Layer Security (RFC 9420)"
 readme = "README.md"
 license = { text = "Apache-2.0" }

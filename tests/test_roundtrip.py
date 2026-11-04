@@ -68,7 +68,7 @@ def test_module_constants():
     assert mls_py.DEFAULT_CIPHER_SUITE == 1
     assert mls_py.DEFAULT_MAX_MESSAGE_SIZE == 16 * 2**20
     assert "invalid_message" in mls_py.ERROR_CODES
-    assert mls_py.__version__ == "0.1.0"
+    assert mls_py.__version__ == "0.2.0"
 
 
 def test_objects_not_picklable(pair):
