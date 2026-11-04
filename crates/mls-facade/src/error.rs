@@ -20,6 +20,7 @@ pub enum ErrorCode {
     LeavePending,
     InvalidKeyPackage,
     InvalidWelcome,
+    IdentityRejected,
     InvalidArgument,
     InputTooLarge,
     Storage,
@@ -42,6 +43,7 @@ impl ErrorCode {
             ErrorCode::LeavePending => "leave_pending",
             ErrorCode::InvalidKeyPackage => "invalid_key_package",
             ErrorCode::InvalidWelcome => "invalid_welcome",
+            ErrorCode::IdentityRejected => "identity_rejected",
             ErrorCode::InvalidArgument => "invalid_argument",
             ErrorCode::InputTooLarge => "input_too_large",
             ErrorCode::Storage => "storage",
@@ -63,6 +65,7 @@ impl ErrorCode {
         ErrorCode::LeavePending,
         ErrorCode::InvalidKeyPackage,
         ErrorCode::InvalidWelcome,
+        ErrorCode::IdentityRejected,
         ErrorCode::InvalidArgument,
         ErrorCode::InputTooLarge,
         ErrorCode::Storage,
@@ -167,6 +170,10 @@ pub(crate) fn map_upstream(ctx: Ctx, e: &Upstream) -> Error {
             (C::InvalidKeyPackage, "invalid key package init key")
         }
         Upstream::TimeOverflow => (C::InvalidKeyPackage, "invalid key package lifetime"),
+        Upstream::IdentityProviderError(inner) if crate::identity::is_rejection(inner) => (
+            C::IdentityRejected,
+            "credential rejected by the application verifier",
+        ),
         Upstream::IdentityProviderError(_) => match ctx {
             Ctx::KeyPackage => (C::InvalidKeyPackage, "credential rejected"),
             Ctx::Welcome => (C::InvalidWelcome, "credential rejected"),

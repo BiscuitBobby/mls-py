@@ -1,4 +1,4 @@
-from typing import Final, Literal, Optional, Tuple, List, final
+from typing import Callable, Final, Literal, Optional, Tuple, List, final
 
 __version__: str
 
@@ -21,6 +21,7 @@ ErrorCode = Literal[
     "leave_pending",
     "invalid_key_package",
     "invalid_welcome",
+    "identity_rejected",
     "invalid_argument",
     "input_too_large",
     "storage",
@@ -72,11 +73,20 @@ class Client:
         *,
         cipher_suite: int = 1,
         max_message_size: int = 16 * 2**20,
+        verifier: Optional[Callable[[bytes, bytes], bool]] = None,
     ) -> None:
-        """``identity`` is an unverified BasicCredential label (1..=256 bytes).
+        """``identity`` is a BasicCredential label (1..=256 bytes).
 
         ``max_message_size`` bounds every inbound serialized input (messages,
         commits, proposals, welcomes, key packages).
+
+        ``verifier(identity, signature_key)`` is called for every credential
+        this client's groups accept, including its own; only ``True``
+        accepts. Anything else, or an exception (reported to
+        ``sys.unraisablehook``), fails the operation with
+        ``identity_rejected`` and leaves state unchanged. It must not call
+        mls_py (``RuntimeError``) and should not reference this client.
+        Without a verifier, identities are unverified labels.
         """
     @property
     def cipher_suite(self) -> int: ...

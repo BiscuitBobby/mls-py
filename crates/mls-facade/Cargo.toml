@@ -10,3 +10,4 @@ publish = false
 [dependencies]
 mls-rs = { workspace = true }
 mls-rs-crypto-awslc = { workspace = true }
+mls-rs-core = { workspace = true }

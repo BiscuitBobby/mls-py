@@ -77,7 +77,7 @@ Supported by the provider: suites 1, 2, 3, 5, 7. The binding allowlists **1**
 
 | Item | Choice | Why |
 |---|---|---|
-| Credentials | `BasicCredential` + `BasicIdentityProvider` | v0.1 scope. Identities are unverified labels (upstream itself calls Basic "for demonstration"; X.509 is recommended for production) |
+| Credentials | `BasicCredential`; identity provider = upstream `BasicIdentityProvider` semantics plus an optional application verifier (v0.2) | Without a verifier, identities are unverified labels (upstream itself calls Basic "for demonstration"; X.509 is recommended for production). The verifier is consulted from `validate_member` and `validate_external_sender`, i.e. wherever upstream validates a leaf node (key packages, Welcome trees, commit paths, updates, own leaf at group creation); `identity`/`valid_successor` stay Basic (identity = credential bytes) |
 | `path_required` | **true** (upstream default false) | every commit carries an UpdatePath, so the committer always refreshes its leaf key (post-compromise security). Cost: larger add-only commits |
 | Ratchet tree in Welcome | yes | joiners need nothing out of band |
 | Single Welcome per commit | yes | |
@@ -137,7 +137,7 @@ is easier to reason about.
 | `group.save()` | removed; persistence is automatic | §4 persistence invariant |
 | no commit-without-proposals API | `group.commit()` | needed to answer received proposals; also the key-rotation (PCS) primitive |
 | `Event(kind, data, sender_index, epoch, removed)` | adds `aad` | receivers must see the authenticated data |
-| error codes | adds `group_not_found`, `commit_required`; `unsupported_cipher_suite` always raised by the facade | |
+| error codes | adds `group_not_found`, `commit_required`; `unsupported_cipher_suite` always raised by the facade; v0.2 adds `leave_pending` and `identity_rejected` (only for the application verifier's rejection, recognised by downcasting upstream's `IdentityProviderError`) | |
 | — | `group.is_active` | lets apps check terminal state without catching |
 | local self-removal ends in `Removed` | v0.1: not possible, MLS forbids a committer removing itself. v0.2: `leave()` sends a Remove proposal for our own leaf; another member's commit ends in `Removed` | RFC 9420 §12.1.3, §12.2 |
 | `Event` as a `@dataclass(frozen=True)` | Rust `#[pyclass(frozen, eq, hash)]` with a repr that omits contents | immutability without plaintext in logs |
@@ -175,6 +175,18 @@ v0.1 classical only, PQ-ready API (see README and the plan's roadmap).
 - Error messages are fixed strings chosen per upstream variant; upstream
   `Debug` text is never exposed. `Event.__repr__` omits data and aad contents.
 - `Client`/`Group` are not picklable and expose no raw state export.
+- **Verifier callback (v0.2).** Upstream calls it inside a group operation,
+  under the group lock (and the registry lock while joining), on whatever
+  thread performs validation. The binding re-attaches to the interpreter
+  only for the call. A thread-local flag set for the duration makes every
+  `Client`/`Group` method raise `RuntimeError` instead of re-entering
+  (deadlock). Only `True` accepts; exceptions go to `sys.unraisablehook`
+  and reject (fail closed). The callable is owned by Rust and deliberately
+  not reported to the cycle collector. It is shared by a client and all its
+  groups, so no single object can report it accurately: under-reporting
+  would let the collector clear a verifier still in use by a live group, and
+  over-reporting corrupts CPython's GC accounting. A verifier that references
+  its own client therefore leaks it; this is documented.
 
 ## 8. Verification record
 

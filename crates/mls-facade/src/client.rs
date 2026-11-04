@@ -5,10 +5,7 @@ use mls_rs::{
     client_builder::{
         BaseConfig, PaddingMode, WithCryptoProvider, WithIdentityProvider, WithMlsRules,
     },
-    identity::{
-        basic::{BasicCredential, BasicIdentityProvider},
-        SigningIdentity,
-    },
+    identity::{basic::BasicCredential, SigningIdentity},
     mls_rules::{CommitOptions, DefaultMlsRules, EncryptionOptions},
     storage_provider::in_memory::InMemoryGroupStateStorage,
     CipherSuite, CipherSuiteProvider, CryptoProvider, MlsMessage, WireFormat,
@@ -17,13 +14,14 @@ use mls_rs_crypto_awslc::AwsLcCryptoProvider;
 
 use crate::error::{map_upstream, Ctx, Error, ErrorCode, Result};
 use crate::group::{Group, GroupShared, Lifecycle};
-use crate::{limits, SUPPORTED_CIPHER_SUITES};
+use crate::identity::{FacadeIdentityProvider, MemberVerifier};
+use crate::{limits, DEFAULT_CIPHER_SUITE, DEFAULT_MAX_MESSAGE_SIZE, SUPPORTED_CIPHER_SUITES};
 
 pub(crate) type Config = WithMlsRules<
     DefaultMlsRules,
     WithCryptoProvider<
         AwsLcCryptoProvider,
-        WithIdentityProvider<BasicIdentityProvider, BaseConfig>,
+        WithIdentityProvider<FacadeIdentityProvider, BaseConfig>,
     >,
 >;
 
@@ -57,6 +55,27 @@ impl ClientInner {
     }
 }
 
+/// Optional settings for [`Client::with_options`].
+#[derive(Clone)]
+pub struct ClientOptions {
+    pub cipher_suite: u16,
+    /// Bound on every inbound serialized input.
+    pub max_message_size: usize,
+    /// Application policy for every credential the client's groups accept.
+    /// `None` accepts any well-formed BasicCredential (unverified labels).
+    pub verifier: Option<Arc<dyn MemberVerifier>>,
+}
+
+impl Default for ClientOptions {
+    fn default() -> Self {
+        Self {
+            cipher_suite: DEFAULT_CIPHER_SUITE,
+            max_message_size: DEFAULT_MAX_MESSAGE_SIZE,
+            verifier: None,
+        }
+    }
+}
+
 /// An MLS client: one identity, one signing key, one cipher suite, and a
 /// process-local in-memory store for key packages and group state.
 #[derive(Clone)]
@@ -66,6 +85,22 @@ pub struct Client {
 
 impl Client {
     pub fn new(identity: &[u8], cipher_suite: u16, max_message_size: usize) -> Result<Self> {
+        Self::with_options(
+            identity,
+            ClientOptions {
+                cipher_suite,
+                max_message_size,
+                ..Default::default()
+            },
+        )
+    }
+
+    pub fn with_options(identity: &[u8], options: ClientOptions) -> Result<Self> {
+        let ClientOptions {
+            cipher_suite,
+            max_message_size,
+            verifier,
+        } = options;
         if identity.is_empty() || identity.len() > limits::MAX_IDENTITY_LEN {
             return Err(Error::new(
                 ErrorCode::InvalidArgument,
@@ -122,7 +157,7 @@ impl Client {
             .with_encryption_options(EncryptionOptions::new(true, PaddingMode::StepFunction));
 
         let mls = mls_rs::Client::builder()
-            .identity_provider(BasicIdentityProvider)
+            .identity_provider(FacadeIdentityProvider::new(verifier))
             .crypto_provider(provider)
             .mls_rules(rules)
             .signing_identity(SigningIdentity::new(credential, public), secret, cs)

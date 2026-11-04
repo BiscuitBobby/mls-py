@@ -46,7 +46,8 @@ assert group.export_secret(b"my-app/v1", b"", 32) == bob_group.export_secret(b"m
 
 ```python
 SUPPORTED_CIPHER_SUITES: tuple[int, ...]     # (1, 2) in v0.1; classical only
-Client(identity: bytes, *, cipher_suite: int = 1, max_message_size: int = 16 * 2**20)
+Client(identity: bytes, *, cipher_suite: int = 1, max_message_size: int = 16 * 2**20,
+       verifier: Callable[[bytes, bytes], bool] | None = None)
 client.cipher_suite, client.max_message_size
 client.key_package() -> bytes                # fresh, single-use
 client.create_group() -> Group
@@ -78,7 +79,7 @@ with `TypeError`; out-of-range values raise `MlsError(code="invalid_argument")`.
 `invalid_message`, `invalid_signature`, `invalid_epoch`, `invalid_group_state`,
 `group_already_loaded`, `group_not_found`, `pending_commit`,
 `no_pending_commit`, `commit_required`, `leave_pending`, `invalid_key_package`,
-`invalid_welcome`, `invalid_argument`, `input_too_large`, `storage`,
+`invalid_welcome`, `identity_rejected`, `invalid_argument`, `input_too_large`, `storage`,
 `unsupported_cipher_suite`, `other`. Messages never contain plaintext, keys or
 internal state.
 
@@ -127,6 +128,26 @@ The proposal lives only in the current epoch: if a commit arrives that does
 not remove you, `leave_pending` becomes false and you can call `leave()` again.
 Processing your own proposal when the server echoes it back is harmless.
 
+**Verifying identities.** Without a verifier, a `BasicCredential` identity
+is a label anyone can claim. Pass `verifier(identity, signature_key) -> bool`
+to bind identities to keys you trust, for example keys from your directory or
+key-transparency service. It is called for every credential your groups
+accept: each member in a Welcome you join (including yourself), the owner of a
+key package you add, new members and updated leaves in commits you process,
+and your own credential when you create a group. Only `True` accepts. Any
+other value, or an exception (reported to `sys.unraisablehook`), fails the
+operation with `identity_rejected`, and group state is unchanged.
+
+- It runs in the middle of an MLS operation, possibly on another thread. Keep
+  it fast and free of side effects.
+- It must not call `mls_py` (that raises `RuntimeError`) or wait on threads
+  that do.
+- Do not reference the `Client` or its groups from the verifier. Rust holds
+  that reference where Python's cycle collector can't see it, so the client
+  would never be freed.
+- All members should apply the same policy. A member that rejects a commit
+  others accepted cannot follow the group from that epoch on.
+
 **Sender index.** `sender_index` is an MLS *leaf index*, not an identity. It is
 stable while that member stays in the group, but a leaf freed by a removal can
 be reused by a later member. It is `None` for non-member senders.
@@ -157,10 +178,11 @@ calls on one group are serialized internally. Groups outlive their `Client`.
   ML-KEM support is experimental and uses non-standard suite IDs; it is not
   exposed. The API takes `cipher_suite` so PQ suites can be added later without
   an API break.
-- **Identities are unverified.** `BasicCredential` bytes are labels anyone can
-  claim. Successful MLS processing does **not** mean the sender is who they
-  say or is authorized by your application. Your app owns authentication,
-  authorization and membership policy.
+- **Identities are unverified unless you pass a `verifier`.** `BasicCredential`
+  bytes are labels anyone can claim. Without a verifier, successful MLS
+  processing does **not** mean the sender is who they say. With one, it means
+  only that your verifier accepted the (identity, key) pair. Authorization and
+  membership policy remain your application's job.
 - **Metadata.** Commits, proposals and application messages are all sent as
   encrypted MLS PrivateMessages; the delivery service sees the group id, epoch,
   content type, message sizes (padded) and `aad`, which is authenticated but

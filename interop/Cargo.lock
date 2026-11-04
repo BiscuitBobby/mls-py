@@ -1294,6 +1294,7 @@ name = "mls-facade"
 version = "0.1.0"
 dependencies = [
  "mls-rs",
+ "mls-rs-core",
  "mls-rs-crypto-awslc",
 ]
 

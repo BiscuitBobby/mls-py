@@ -10,10 +10,12 @@
 mod client;
 mod error;
 mod group;
+mod identity;
 
-pub use client::Client;
+pub use client::{Client, ClientOptions};
 pub use error::{Error, ErrorCode, Result};
 pub use group::{Event, EventKind, Group};
+pub use identity::MemberVerifier;
 
 /// Cipher suites this build accepts (RFC 9420 IANA values). Classical only in
 /// v0.1; see the PQC section of docs/DESIGN.md.

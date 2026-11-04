@@ -6,9 +6,12 @@
 //! reattaches to build Python objects. No Python object is touched while a
 //! facade lock is held.
 
+use std::cell::Cell;
+use std::sync::Arc;
+
 use mls_facade as facade;
 use pyo3::create_exception;
-use pyo3::exceptions::{PyException, PyTypeError};
+use pyo3::exceptions::{PyException, PyRuntimeError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedBytes;
 use pyo3::types::{PyBool, PyBytes, PyInt, PyTuple};
@@ -56,6 +59,60 @@ fn bytes<'py>(py: Python<'py>, v: Vec<u8>) -> Bound<'py, PyBytes> {
     PyBytes::new(py, &v)
 }
 
+thread_local! {
+    /// Set while this thread runs a verifier callback. The callback executes
+    /// in the middle of a group operation, under that group's lock (and,
+    /// while joining, the client's registry lock), so calling back into
+    /// mls_py could deadlock; every Client/Group method refuses instead.
+    static IN_VERIFIER: Cell<bool> = const { Cell::new(false) };
+}
+
+fn not_in_verifier() -> PyResult<()> {
+    if IN_VERIFIER.with(Cell::get) {
+        return Err(PyRuntimeError::new_err(
+            "mls_py methods cannot be called from inside a verifier",
+        ));
+    }
+    Ok(())
+}
+
+/// Run one facade operation: refuse re-entry from a verifier, detach from
+/// the Python runtime for the whole operation, convert the error.
+fn call<T: Send>(py: Python<'_>, f: impl FnOnce() -> facade::Result<T> + Send) -> PyResult<T> {
+    not_in_verifier()?;
+    py.detach(f).map_err(|e| to_py_err(py, e))
+}
+
+/// A Python callable used as the facade's `MemberVerifier`.
+///
+/// Only `True` accepts; any other return value or an exception rejects
+/// (exceptions are reported through `sys.unraisablehook`). The callable is
+/// owned by Rust and not visible to Python's cycle collector, so a verifier
+/// that references its own Client keeps that Client alive (documented).
+struct PyVerifier(Py<PyAny>);
+
+impl facade::MemberVerifier for PyVerifier {
+    fn verify(&self, identity: &[u8], signature_key: &[u8]) -> bool {
+        struct Restore(bool);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                IN_VERIFIER.with(|c| c.set(self.0));
+            }
+        }
+        let _restore = Restore(IN_VERIFIER.with(|c| c.replace(true)));
+        Python::attach(|py| {
+            let f = self.0.bind(py);
+            match f.call1((PyBytes::new(py, identity), PyBytes::new(py, signature_key))) {
+                Ok(v) => v.cast::<PyBool>().is_ok_and(|b| b.is_true()),
+                Err(e) => {
+                    e.write_unraisable(py, Some(f));
+                    false
+                }
+            }
+        })
+    }
+}
+
 /// An MLS client: one identity, one signing key and one cipher suite, with a
 /// process-local in-memory store. Signing keys never leave Rust.
 #[pyclass(frozen, module = "mls_py")]
@@ -66,12 +123,13 @@ struct Client {
 #[pymethods]
 impl Client {
     #[new]
-    #[pyo3(signature = (identity, *, cipher_suite = None, max_message_size = None))]
+    #[pyo3(signature = (identity, *, cipher_suite = None, max_message_size = None, verifier = None))]
     fn new(
         py: Python<'_>,
         identity: PyBackedBytes,
         cipher_suite: Option<&Bound<'_, PyAny>>,
         max_message_size: Option<&Bound<'_, PyAny>>,
+        verifier: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
         let cs: u16 = match cipher_suite {
             Some(o) => int_arg(o, "cipher_suite out of range").map_err(|e| {
@@ -93,9 +151,20 @@ impl Client {
             Some(o) => int_arg(o, "max_message_size out of range")?,
             None => facade::DEFAULT_MAX_MESSAGE_SIZE,
         };
-        let inner = py
-            .detach(|| facade::Client::new(&identity, cs, max))
-            .map_err(|e| to_py_err(py, e))?;
+        let verifier = match verifier {
+            None => None,
+            Some(v) if v.is_none() => None,
+            Some(v) if v.is_callable() => {
+                Some(Arc::new(PyVerifier(v.clone().unbind())) as Arc<dyn facade::MemberVerifier>)
+            }
+            Some(_) => return Err(PyTypeError::new_err("verifier must be callable")),
+        };
+        let options = facade::ClientOptions {
+            cipher_suite: cs,
+            max_message_size: max,
+            verifier,
+        };
+        let inner = call(py, || facade::Client::with_options(&identity, options))?;
         Ok(Self { inner })
     }
 
@@ -111,30 +180,22 @@ impl Client {
 
     /// A fresh, single-use key package (serialized MLSMessage).
     fn key_package<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        let out = py
-            .detach(|| self.inner.key_package())
-            .map_err(|e| to_py_err(py, e))?;
+        let out = call(py, || self.inner.key_package())?;
         Ok(bytes(py, out))
     }
 
     fn create_group(&self, py: Python<'_>) -> PyResult<Group> {
-        let g = py
-            .detach(|| self.inner.create_group())
-            .map_err(|e| to_py_err(py, e))?;
+        let g = call(py, || self.inner.create_group())?;
         Ok(Group { inner: g })
     }
 
     fn join(&self, py: Python<'_>, welcome: PyBackedBytes) -> PyResult<Group> {
-        let g = py
-            .detach(|| self.inner.join(&welcome))
-            .map_err(|e| to_py_err(py, e))?;
+        let g = call(py, || self.inner.join(&welcome))?;
         Ok(Group { inner: g })
     }
 
     fn load_group(&self, py: Python<'_>, group_id: PyBackedBytes) -> PyResult<Group> {
-        let g = py
-            .detach(|| self.inner.load_group(&group_id))
-            .map_err(|e| to_py_err(py, e))?;
+        let g = call(py, || self.inner.load_group(&group_id))?;
         Ok(Group { inner: g })
     }
 
@@ -158,47 +219,39 @@ impl Group {
 
     #[getter]
     fn is_active(&self, py: Python<'_>) -> PyResult<bool> {
-        py.detach(|| self.inner.is_active())
-            .map_err(|e| to_py_err(py, e))
+        call(py, || self.inner.is_active())
     }
 
     #[getter]
     fn epoch(&self, py: Python<'_>) -> PyResult<u64> {
-        py.detach(|| self.inner.epoch())
-            .map_err(|e| to_py_err(py, e))
+        call(py, || self.inner.epoch())
     }
 
     #[getter]
     fn leaf_index(&self, py: Python<'_>) -> PyResult<u32> {
-        py.detach(|| self.inner.leaf_index())
-            .map_err(|e| to_py_err(py, e))
+        call(py, || self.inner.leaf_index())
     }
 
     #[getter]
     fn cipher_suite(&self, py: Python<'_>) -> PyResult<u16> {
-        py.detach(|| self.inner.cipher_suite())
-            .map_err(|e| to_py_err(py, e))
+        call(py, || self.inner.cipher_suite())
     }
 
     #[getter]
     fn has_pending_commit(&self, py: Python<'_>) -> PyResult<bool> {
-        py.detach(|| self.inner.has_pending_commit())
-            .map_err(|e| to_py_err(py, e))
+        call(py, || self.inner.has_pending_commit())
     }
 
     /// True between `leave()` and the next commit in this group.
     #[getter]
     fn leave_pending(&self, py: Python<'_>) -> PyResult<bool> {
-        py.detach(|| self.inner.leave_pending())
-            .map_err(|e| to_py_err(py, e))
+        call(py, || self.inner.leave_pending())
     }
 
     /// `[(leaf_index, identity), ...]` for current members.
     #[getter]
     fn members<'py>(&self, py: Python<'py>) -> PyResult<Vec<(u32, Bound<'py, PyBytes>)>> {
-        let m = py
-            .detach(|| self.inner.members())
-            .map_err(|e| to_py_err(py, e))?;
+        let m = call(py, || self.inner.members())?;
         Ok(m.into_iter().map(|(i, id)| (i, bytes(py, id))).collect())
     }
 
@@ -209,9 +262,7 @@ impl Group {
         py: Python<'py>,
         key_package: PyBackedBytes,
     ) -> PyResult<Bound<'py, PyTuple>> {
-        let (c, w) = py
-            .detach(|| self.inner.add(&key_package))
-            .map_err(|e| to_py_err(py, e))?;
+        let (c, w) = call(py, || self.inner.add(&key_package))?;
         PyTuple::new(py, [bytes(py, c), bytes(py, w)])
     }
 
@@ -222,42 +273,32 @@ impl Group {
         leaf_index: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyBytes>> {
         let idx: u32 = int_arg(leaf_index, "leaf_index out of range")?;
-        let c = py
-            .detach(|| self.inner.remove(idx))
-            .map_err(|e| to_py_err(py, e))?;
+        let c = call(py, || self.inner.remove(idx))?;
         Ok(bytes(py, c))
     }
 
     /// Proposal asking another member to remove us; send it to the group.
     fn leave<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        let p = py
-            .detach(|| self.inner.leave())
-            .map_err(|e| to_py_err(py, e))?;
+        let p = call(py, || self.inner.leave())?;
         Ok(bytes(py, p))
     }
 
     /// Commit refreshing our own leaf key and including received proposals.
     fn commit<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        let c = py
-            .detach(|| self.inner.commit())
-            .map_err(|e| to_py_err(py, e))?;
+        let c = call(py, || self.inner.commit())?;
         Ok(bytes(py, c))
     }
 
     fn apply_pending(&self, py: Python<'_>) -> PyResult<()> {
-        py.detach(|| self.inner.apply_pending())
-            .map_err(|e| to_py_err(py, e))
+        call(py, || self.inner.apply_pending())
     }
 
     fn discard_pending(&self, py: Python<'_>) -> PyResult<()> {
-        py.detach(|| self.inner.discard_pending())
-            .map_err(|e| to_py_err(py, e))
+        call(py, || self.inner.discard_pending())
     }
 
     fn process(&self, py: Python<'_>, message: PyBackedBytes) -> PyResult<Event> {
-        let ev = py
-            .detach(|| self.inner.process(&message))
-            .map_err(|e| to_py_err(py, e))?;
+        let ev = call(py, || self.inner.process(&message))?;
         Ok(Event::from(ev))
     }
 
@@ -268,9 +309,9 @@ impl Group {
         data: PyBackedBytes,
         aad: Option<PyBackedBytes>,
     ) -> PyResult<Bound<'py, PyBytes>> {
-        let out = py
-            .detach(|| self.inner.encrypt(&data, aad.as_deref().unwrap_or(&[])))
-            .map_err(|e| to_py_err(py, e))?;
+        let out = call(py, || {
+            self.inner.encrypt(&data, aad.as_deref().unwrap_or(&[]))
+        })?;
         Ok(bytes(py, out))
     }
 
@@ -282,9 +323,7 @@ impl Group {
         length: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyBytes>> {
         let len: usize = int_arg(length, "length must be in 1..=1024")?;
-        let out = py
-            .detach(|| self.inner.export_secret(&label, &context, len))
-            .map_err(|e| to_py_err(py, e))?;
+        let out = call(py, || self.inner.export_secret(&label, &context, len))?;
         Ok(bytes(py, out))
     }
 
