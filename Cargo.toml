@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = ["crates/mls-facade"]
+exclude = ["fuzz", "interop"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+rust-version = "1.85"
+
+# mls-rs is pinned to one upstream commit (0.57.0 + a PreSharedKeyStorage
+# trait addition and an example; no protocol/crypto changes). Every mls-rs
+# crate must come from this same source: git main reuses crates.io version
+# numbers with a different API, so mixing sources is unsafe. Bump all
+# together, never one alone (see docs/DESIGN.md, scripts/verify_deps.sh).
+[workspace.dependencies]
+mls-rs = { git = "https://github.com/awslabs/mls-rs", rev = "6c819eface1e8b00a3241412d1b7e21c162df515" }
+mls-rs-crypto-awslc = { git = "https://github.com/awslabs/mls-rs", rev = "6c819eface1e8b00a3241412d1b7e21c162df515" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3

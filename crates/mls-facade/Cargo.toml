@@ -1,0 +1,12 @@
+[package]
+name = "mls-facade"
+description = "Pure-Rust facade over mls-rs used by the mls_py Python binding"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+mls-rs = { workspace = true }
+mls-rs-crypto-awslc = { workspace = true }
