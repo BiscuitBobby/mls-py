@@ -204,9 +204,11 @@ v0.1 classical only, PQ-ready API (see README and the plan's roadmap).
 - Error messages are fixed strings chosen per upstream variant; upstream
   `Debug` text is never exposed. `Event.__repr__` omits data and aad contents.
 - `Client`/`Group` are not picklable and expose no raw state export.
-- **Verifier callback (v0.2).** Upstream calls it inside a group operation,
-  under the group lock (and the registry lock while joining), on whatever
-  thread performs validation. The binding re-attaches to the interpreter
+- **Verifier callback (v0.2).** Upstream calls it in the middle of an MLS
+  operation, on whatever thread performs validation. For group operations
+  (`add`, `commit`, `process`, ...) that is under the group's lock. For
+  `join` and `create_group` no facade lock is held: validation completes
+  before the registry lock is taken. The binding re-attaches to the interpreter
   only for the call. A thread-local flag set for the duration makes every
   `Client`/`Group` method raise `RuntimeError` instead of re-entering
   (deadlock). Only `True` accepts; exceptions go to `sys.unraisablehook`

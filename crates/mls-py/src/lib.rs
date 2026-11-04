@@ -62,9 +62,9 @@ fn bytes<'py>(py: Python<'py>, v: Vec<u8>) -> Bound<'py, PyBytes> {
 
 thread_local! {
     /// Set while this thread runs a verifier callback. The callback executes
-    /// in the middle of a group operation, under that group's lock (and,
-    /// while joining, the client's registry lock), so calling back into
-    /// mls_py could deadlock; every Client/Group method refuses instead.
+    /// in the middle of an MLS operation, for group operations under that
+    /// group's lock, so calling back into mls_py could deadlock; every
+    /// Client/Group method refuses instead.
     static IN_VERIFIER: Cell<bool> = const { Cell::new(false) };
 }
 
