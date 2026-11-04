@@ -1,0 +1,44 @@
+# cargo-about configuration for THIRD_PARTY_NOTICES.txt (scripts/gen_notices.sh).
+# Covers the Rust crates compiled into the wheels for every CI target; build
+# scripts, dev-dependencies and this workspace's own crates are excluded.
+accepted = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-3-Clause",
+    "ISC",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+private = { ignore = true }
+
+# AWS-LC ships one license file that covers its BoringSSL/OpenSSL-derived and
+# third-party code; use it verbatim instead of generic per-license texts. The
+# checksums make a dependency bump fail here until the new files are reviewed.
+[aws-lc-sys.clarify]
+license = "ISC AND (Apache-2.0 OR ISC) AND Apache-2.0 AND MIT AND BSD-3-Clause AND (Apache-2.0 OR ISC OR MIT) AND (Apache-2.0 OR ISC OR MIT-0)"
+[[aws-lc-sys.clarify.files]]
+path = "LICENSE"
+checksum = "728536b4160e051f86d7c9c388f704866b3d512cd7df97ac3516c65279523c4e"
+[[aws-lc-sys.clarify.files]]
+path = "aws-lc/third_party/fiat/LICENSE"
+license = "MIT"
+checksum = "43e358d7b6eb109d0f51f7b3a090fd82607965767c25fadee39e922475de2061"
+
+[aws-lc-rs.clarify]
+license = "ISC AND (Apache-2.0 OR ISC)"
+[[aws-lc-rs.clarify.files]]
+path = "LICENSE"
+checksum = "b50b376e7d24a0598488b730c3034ffcd0b58dd36c0913a24b9903a3cfd04bf7"
