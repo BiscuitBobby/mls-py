@@ -221,7 +221,36 @@ v0.1 classical only, PQ-ready API (see README and the plan's roadmap).
 
 ## 8. Verification record
 
-### Local CI run (2026-11-04), mls-rs pinned to `6c819ef`
+### v0.2 local CI run (2026-11-04), mls-rs pinned to `6c819ef`
+
+Same method as the v0.1 run below. The wheels were built from the
+`84aeb76` tree (the aarch64 one already with the module-docstring edit later
+committed as `859289b`); the later commits up to the rename change only
+docstrings, packaging metadata and the CI script. A host-built wheel after the rename reports
+`Name: mls-py`, keeps the `mls_py-0.2.0-*` file names, installs as `mls-py`,
+`mls_py` or `MLS.py`, and passes 110/110.
+
+| Job | Result |
+|---|---|
+| `actionlint` (v1.7.11) on both workflows | clean, including the `publish-testpypi` job; all 27 `uses:` pinned to commit SHAs |
+| rust-tests: `scripts/verify_deps.sh` | pass (single mls-rs source = pinned commit; mls-rs-core features unchanged by the SQLite provider; 20 upstream probes hold) |
+| rust-tests: facade | `facade` 25 (+ the ignored 1000-member test, run separately in release: pass), `leave` 5, `proposals` 1, `storage` 12 + 1 unit test, `upstream_probe` 20, `verifier` 5, `welcome_reuse` 2 |
+| rust-tests: OpenMLS interop | pass (3 scenarios incl. leave in both directions, x 2 suites) |
+| supply-chain: `cargo audit --deny warnings` | 0 advisories (101 crates) |
+| supply-chain: `scripts/audit_git_pins.sh` | no advisories for the 9 mls-rs crates (now incl. `mls-rs-provider-sqlite`) |
+| supply-chain: `cargo deny check` | advisories, bans, licenses, sources ok (Zlib allowed for `foldhash`) |
+| fuzz-smoke (120 s each) | no crashes: `parse_message` 10.3M runs, `join` 9.1M, `key_package` 4.0M, `process` 370K |
+| linux x86_64 wheel | `mls_py-0.2.0-cp39-abi3-manylinux_2_28_x86_64.whl` (2.8 MB, bundled SQLite); auditwheel: manylinux_2_28, only glibc <= 2.28 (libc, libm, libdl, libpthread) + libgcc_s |
+| test x86_64, Python 3.9-3.14 | 110/110 on every version (3.9 and 3.10 rerun after PyPI read timeouts inside the container) |
+| linux aarch64 wheel | `mls_py-0.2.0-cp39-abi3-manylinux_2_28_aarch64.whl` (2.6 MB); auditwheel: manylinux_2_28, same library set |
+| test aarch64, Python 3.9-3.14 (qemu-user) | 110/110 on every version (3.12-3.14 rerun after the Docker daemon restarted mid-run) |
+| sdist + build-from-sdist | pass, 110/110. The first attempt failed, and the script then kept only the last 3 lines, so the cause is unknown; it now keeps the full log (`dist-ci/sdist-test.log`) and the rerun passed |
+| Upstream `mls-rs-provider-sqlite` suite at `6c819ef`, `sqlite-bundled` | 31/31 (rusqlite 0.37.0 / libsqlite3-sys 0.35.0, as in our lockfile) |
+
+**Not run:** the macOS and Windows jobs, `publish` and `publish-testpypi`
+(need GitHub-hosted runners or a remote).
+
+### v0.1 local CI run (2026-11-04), mls-rs pinned to `6c819ef`
 
 The Linux jobs of `.github/workflows/{wheels,audit}.yml` were run locally
 (`scripts/ci_local.sh`, Docker; aarch64 natively under qemu-user emulation).
