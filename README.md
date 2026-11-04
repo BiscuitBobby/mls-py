@@ -172,7 +172,8 @@ calls on one group are serialized internally. Groups outlive their `Client`.
   where upstream supports it; plaintext and exported secrets returned to Python
   are ordinary `bytes` and are **not** securely erased.
 - Interoperability is claimed only for what has been tested: OpenMLS 0.9.1 on
-  suites 1 and 2 (join, messages, commits and removal in both directions);
+  suites 1 and 2 (join, messages, commits, removal and leave in both
+  directions);
   see `docs/DESIGN.md`.
 - A working round trip is not a production-ready secure messenger.
 

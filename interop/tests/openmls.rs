@@ -29,14 +29,21 @@ impl Om {
             credential: BasicCredential::new(name.as_bytes().to_vec()).into(),
             signature_key: signer.to_public_vec().into(),
         };
-        Self { provider, signer, cred, cs }
+        Self {
+            provider,
+            signer,
+            cred,
+            cs,
+        }
     }
 
     fn key_package(&self) -> Vec<u8> {
         let bundle = KeyPackage::builder()
             .build(self.cs, &self.provider, &self.signer, self.cred.clone())
             .unwrap();
-        MlsMessageOut::from(bundle.key_package().clone()).to_bytes().unwrap()
+        MlsMessageOut::from(bundle.key_package().clone())
+            .to_bytes()
+            .unwrap()
     }
 
     fn join(&self, welcome: &[u8]) -> MlsGroup {
@@ -45,7 +52,9 @@ impl Om {
             MlsMessageBodyIn::Welcome(w) => w,
             _ => panic!("not a welcome"),
         };
-        let cfg = MlsGroupJoinConfig::builder().use_ratchet_tree_extension(true).build();
+        let cfg = MlsGroupJoinConfig::builder()
+            .use_ratchet_tree_extension(true)
+            .build();
         StagedWelcome::new_from_welcome(&self.provider, &cfg, welcome, None)
             .unwrap()
             .into_group(&self.provider)
@@ -61,10 +70,13 @@ impl Om {
     }
 
     fn parse_kp(&self, bytes: &[u8]) -> KeyPackage {
-        match MlsMessageIn::tls_deserialize_exact(bytes).unwrap().extract() {
-            MlsMessageBodyIn::KeyPackage(kp) => {
-                kp.validate(self.provider.crypto(), ProtocolVersion::Mls10).unwrap()
-            }
+        match MlsMessageIn::tls_deserialize_exact(bytes)
+            .unwrap()
+            .extract()
+        {
+            MlsMessageBodyIn::KeyPackage(kp) => kp
+                .validate(self.provider.crypto(), ProtocolVersion::Mls10)
+                .unwrap(),
             _ => panic!("not a key package"),
         }
     }
@@ -75,10 +87,19 @@ impl Om {
             .unwrap()
             .try_into_protocol_message()
             .unwrap();
-        match g.process_message(&self.provider, pm).unwrap().into_content() {
+        match g
+            .process_message(&self.provider, pm)
+            .unwrap()
+            .into_content()
+        {
             ProcessedMessageContent::ApplicationMessage(a) => Some(a.into_bytes()),
             ProcessedMessageContent::StagedCommitMessage(sc) => {
                 g.merge_staged_commit(&self.provider, *sc).unwrap();
+                None
+            }
+            ProcessedMessageContent::ProposalMessage(p) => {
+                g.store_pending_proposal(self.provider.storage(), *p)
+                    .unwrap();
                 None
             }
             _ => None,
@@ -93,7 +114,8 @@ impl Om {
     }
 
     fn export(&self, g: &MlsGroup) -> Vec<u8> {
-        g.export_secret(self.provider.crypto(), "interop", b"ctx", 32).unwrap()
+        g.export_secret(self.provider.crypto(), "interop", b"ctx", 32)
+            .unwrap()
     }
 }
 
@@ -112,7 +134,11 @@ fn mls_py_hosts_openmls_member() {
         ag.apply_pending().unwrap();
         let mut og = oscar.join(&welcome);
         assert_eq!(og.epoch().as_u64(), ag.epoch().unwrap());
-        assert_eq!(export(&ag), oscar.export(&og), "suite {id}: exporter mismatch after join");
+        assert_eq!(
+            export(&ag),
+            oscar.export(&og),
+            "suite {id}: exporter mismatch after join"
+        );
 
         // Application data both ways.
         let ct = ag.encrypt(b"hi oscar", b"").unwrap();
@@ -127,18 +153,30 @@ fn mls_py_hosts_openmls_member() {
         let c = ag.commit().unwrap();
         ag.apply_pending().unwrap();
         assert!(oscar.process(&mut og, &c).is_none());
-        assert_eq!(export(&ag), oscar.export(&og), "suite {id}: exporter mismatch after mls_py commit");
+        assert_eq!(
+            export(&ag),
+            oscar.export(&og),
+            "suite {id}: exporter mismatch after mls_py commit"
+        );
 
         // OpenMLS self-update commit -> mls_py.
         let (out, _w, _gi) = og
-            .self_update(&oscar.provider, &oscar.signer, LeafNodeParameters::default())
+            .self_update(
+                &oscar.provider,
+                &oscar.signer,
+                LeafNodeParameters::default(),
+            )
             .unwrap()
             .into_contents();
         og.merge_pending_commit(&oscar.provider).unwrap();
         let ev = ag.process(&out.to_bytes().unwrap()).unwrap();
         assert_eq!(ev.kind, EventKind::Commit);
         assert_eq!(ev.epoch, og.epoch().as_u64());
-        assert_eq!(export(&ag), oscar.export(&og), "suite {id}: exporter mismatch after OpenMLS commit");
+        assert_eq!(
+            export(&ag),
+            oscar.export(&og),
+            "suite {id}: exporter mismatch after OpenMLS commit"
+        );
 
         // A third member (mls_py) added by mls_py; OpenMLS follows.
         let carol = Client::new(b"carol", id, DEFAULT_MAX_MESSAGE_SIZE).unwrap();
@@ -155,7 +193,10 @@ fn mls_py_hosts_openmls_member() {
         ag.apply_pending().unwrap();
         cg.process(&rm).unwrap();
         oscar.process(&mut og, &rm);
-        assert!(!og.is_active(), "suite {id}: OpenMLS should see itself removed");
+        assert!(
+            !og.is_active(),
+            "suite {id}: OpenMLS should see itself removed"
+        );
         assert_eq!(export(&ag), export(&cg));
     }
 }
@@ -174,8 +215,15 @@ fn openmls_hosts_mls_py_member() {
         og.merge_pending_commit(&oscar.provider).unwrap();
         let bg = bob.join(&welcome.to_bytes().unwrap()).unwrap();
         assert_eq!(bg.epoch().unwrap(), og.epoch().as_u64());
-        assert_eq!(export(&bg), oscar.export(&og), "suite {id}: exporter mismatch after join");
-        assert_eq!(bg.members().unwrap(), vec![(0, b"oscar".to_vec()), (1, b"bob".to_vec())]);
+        assert_eq!(
+            export(&bg),
+            oscar.export(&og),
+            "suite {id}: exporter mismatch after join"
+        );
+        assert_eq!(
+            bg.members().unwrap(),
+            vec![(0, b"oscar".to_vec()), (1, b"bob".to_vec())]
+        );
 
         let ct = oscar.send(&mut og, b"hello bob");
         assert_eq!(bg.process(&ct).unwrap().data.unwrap(), b"hello bob");
@@ -187,12 +235,20 @@ fn openmls_hosts_mls_py_member() {
         bg.apply_pending().unwrap();
         oscar.process(&mut og, &c);
         let (out, _w, _gi) = og
-            .self_update(&oscar.provider, &oscar.signer, LeafNodeParameters::default())
+            .self_update(
+                &oscar.provider,
+                &oscar.signer,
+                LeafNodeParameters::default(),
+            )
             .unwrap()
             .into_contents();
         og.merge_pending_commit(&oscar.provider).unwrap();
         bg.process(&out.to_bytes().unwrap()).unwrap();
-        assert_eq!(export(&bg), oscar.export(&og), "suite {id}: exporter mismatch after commits");
+        assert_eq!(
+            export(&bg),
+            oscar.export(&og),
+            "suite {id}: exporter mismatch after commits"
+        );
 
         // OpenMLS removes the mls_py member.
         let (rm, _w, _gi) = og
@@ -202,5 +258,62 @@ fn openmls_hosts_mls_py_member() {
         let ev = bg.process(&rm.to_bytes().unwrap()).unwrap();
         assert!(ev.removed, "suite {id}: mls_py should see itself removed");
         assert!(!bg.is_active().unwrap());
+    }
+}
+
+/// RFC 9420 leave (a Remove proposal for one's own leaf, committed by someone
+/// else) in both directions.
+#[test]
+fn leave_both_directions() {
+    for &(id, cs) in SUITES {
+        // mls_py member leaves; OpenMLS commits the proposal.
+        let oscar = Om::new("oscar", cs);
+        let bob = Client::new(b"bob", id, DEFAULT_MAX_MESSAGE_SIZE).unwrap();
+        let mut og = oscar.create_group();
+        let kp = oscar.parse_kp(&bob.key_package().unwrap());
+        let (_c, welcome, _gi) = og
+            .add_members(&oscar.provider, &oscar.signer, core::slice::from_ref(&kp))
+            .unwrap();
+        og.merge_pending_commit(&oscar.provider).unwrap();
+        let bg = bob.join(&welcome.to_bytes().unwrap()).unwrap();
+        let proposal = bg.leave().unwrap();
+        oscar.process(&mut og, &proposal);
+        assert!(
+            og.has_pending_proposals(),
+            "suite {id}: OpenMLS should queue the leave"
+        );
+        let (commit, _w, _gi) = og
+            .commit_to_pending_proposals(&oscar.provider, &oscar.signer)
+            .unwrap();
+        og.merge_pending_commit(&oscar.provider).unwrap();
+        assert_eq!(og.members().count(), 1);
+        let ev = bg.process(&commit.to_bytes().unwrap()).unwrap();
+        assert!(
+            ev.removed,
+            "suite {id}: mls_py leaver should see itself removed"
+        );
+
+        // OpenMLS member leaves; mls_py commits the proposal.
+        let alice = Client::new(b"alice", id, DEFAULT_MAX_MESSAGE_SIZE).unwrap();
+        let oscar = Om::new("oscar", cs);
+        let ag = alice.create_group().unwrap();
+        let (_c, welcome) = ag.add(&oscar.key_package()).unwrap();
+        ag.apply_pending().unwrap();
+        let mut og = oscar.join(&welcome);
+        let proposal = og
+            .leave_group(&oscar.provider, &oscar.signer)
+            .unwrap()
+            .to_bytes()
+            .unwrap();
+        let ev = ag.process(&proposal).unwrap();
+        assert_eq!((ev.kind, ev.sender_index), (EventKind::Proposal, Some(1)));
+        let commit = ag.commit().unwrap();
+        ag.apply_pending().unwrap();
+        assert_eq!(ag.members().unwrap(), vec![(0, b"alice".to_vec())]);
+        oscar.process(&mut og, &commit);
+        assert!(
+            !og.is_active(),
+            "suite {id}: OpenMLS leaver should see itself removed"
+        );
     }
 }
