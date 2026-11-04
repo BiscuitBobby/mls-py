@@ -7,13 +7,13 @@ name = "mls-py"
 version = "0.2.0"
 description = "Minimal Python binding for mls-rs, an implementation of Messaging Layer Security (RFC 9420)"
 readme = "README.md"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.txt"]
 requires-python = ">=3.9"
 keywords = ["mls", "rfc9420", "messaging-layer-security", "e2ee", "cryptography"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS",
     "Operating System :: Microsoft :: Windows",
