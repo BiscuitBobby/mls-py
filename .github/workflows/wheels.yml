@@ -1,6 +1,7 @@
 # Build abi3 wheels + sdist, test every wheel on every supported Python, and
 # (on version tags only, behind the `pypi` environment) publish with PyPI
-# trusted publishing. Third-party actions are pinned to commit SHAs (tag in comment).
+# trusted publishing; a manual run with `testpypi` set publishes to TestPyPI
+# instead. Third-party actions are pinned to commit SHAs (tag in comment).
 name: wheels
 
 on:
@@ -9,6 +10,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      testpypi:
+        description: "Publish the built distributions to TestPyPI (dry run of a release)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -145,3 +151,18 @@ jobs:
         with: { path: dist, merge-multiple: true }
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
         with: { packages-dir: dist }
+
+  # Manual dry run: same artifacts, uploaded to TestPyPI instead. TestPyPI
+  # refuses a version it already has, so each dry run needs a fresh version.
+  publish-testpypi:
+    if: github.event_name == 'workflow_dispatch' && inputs.testpypi
+    needs: [rust-tests, test, sdist-build-test]
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with: { path: dist, merge-multiple: true }
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
+        with: { packages-dir: dist, repository-url: "https://test.pypi.org/legacy/" }
