@@ -1,0 +1,16 @@
+[package]
+name = "mls-py"
+description = "PyO3 layer of the mls_py Python binding for mls-rs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "_mls_py"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+mls-facade = { path = "../mls-facade" }
+pyo3 = { workspace = true, features = ["abi3-py39"] }

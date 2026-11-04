@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/mls-facade"]
+members = ["crates/mls-facade", "crates/mls-py"]
 exclude = ["fuzz", "interop"]
 
 [workspace.package]
@@ -17,6 +17,7 @@ rust-version = "1.85"
 [workspace.dependencies]
 mls-rs = { git = "https://github.com/awslabs/mls-rs", rev = "6c819eface1e8b00a3241412d1b7e21c162df515" }
 mls-rs-crypto-awslc = { git = "https://github.com/awslabs/mls-rs", rev = "6c819eface1e8b00a3241412d1b7e21c162df515" }
+pyo3 = { version = "=0.30.1" }
 
 [profile.release]
 lto = true
